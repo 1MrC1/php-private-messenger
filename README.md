@@ -49,7 +49,9 @@ git clone https://github.com/<you>/php-private-messenger.git
 cd php-private-messenger
 composer install --no-dev
 cp .env.example .env     # then fill it in; see Configuration
-# then create the schema and apply migrations — see Database, below
+mysql -u root -p -e "CREATE DATABASE messenger CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+mysql -u root -p messenger < schema.sql
+for m in migrations/*.sql; do mysql -u root -p messenger < "$m"; done
 ```
 
 Point the web server's document root at the repository root. The shipped
@@ -78,14 +80,21 @@ your PHP-FPM pool (`env[...]`), Apache (`ProxyFCGISetEnvIf`), or systemd.
 
 ## Database
 
-Apply the files in `migrations/` in filename order. They assume the base schema
-(`users`, `chats`, `chat_participants`, `messages`, `message_status`,
-`typing_indicators`, `backup_codes`).
+`schema.sql` creates the seven tables the application uses — `users`, `chats`,
+`chat_participants`, `messages`, `message_status`, `typing_indicators` and
+`backup_codes` — ordered so foreign keys resolve as they are created. Apply it to
+an empty database, then run everything in `migrations/` in filename order.
 
-> **Note:** this repository does not yet ship a single consolidated
-> `schema.sql`, so a from-scratch install currently means deriving the base
-> tables from the queries in `classes/Chat.php` and `classes/Auth.php`. This is
-> the main rough edge; a contributed schema dump would be very welcome.
+Those migrations are **idempotent**: each one checks `information_schema` and
+builds its DDL only if the column is missing, so running them against a fresh
+database is safe and re-running them is harmless. Two of them also have a PHP
+half (`*_encrypt_totp_secrets.php`, `*_hash_legacy_backup_codes.php`) that
+rewrites existing rows; on a new install there is nothing to rewrite, but run
+them anyway so the tracked state is consistent, and take a backup first on an
+existing one.
+
+`tests/schema_test.php` checks that `schema.sql` covers every table the code
+queries and carries no data.
 
 ## Architecture
 
