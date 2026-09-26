@@ -1,0 +1,25 @@
+/uploads/*
+!/uploads/.htaccess
+
+# Generated on the server. Never commit production credentials or the
+# recovery-code pepper.
+/config/runtime-secrets.php
+
+# Local/runtime secrets belong in the root-owned deployment environment, not
+# in the repository. Keep a deliberately sanitized example file possible.
+/.env
+/.env.*
+!/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime and editor debris must not become deployable web content.
+*.log
+*.swp
+*.swo
+.DS_Store
+
+# Dependencies are restored with composer, not committed.
+/vendor/

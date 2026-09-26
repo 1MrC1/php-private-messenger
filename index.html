@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
+    <meta name="theme-color" content="#07101c">
+    <meta name="description" content="Messenger — calm, fast messaging for the people who matter.">
+    <title>Messenger - Instant Messaging</title>
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"
+          crossorigin="anonymous">
+    <!-- Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet"
+          integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0"
+          crossorigin="anonymous">
+
+    <link href="assets/css/style.css?v=20260926.3" rel="stylesheet">
+
+
+</head>
+<body>
+<div class="main-container">
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-brand">
+                <button class="brand-lockup brand-home" type="button" data-pm-action="chat-home"
+                        aria-label="Messenger, go to chat home" title="Chat home">
+                    <span class="brand-mark" aria-hidden="true">
+                        <span>pm</span>
+                        <i></i>
+                    </span>
+                    <span class="brand-copy">
+                        <span class="brand-name">Messenger</span>
+                        <span class="brand-tagline">Stay in the moment</span>
+                    </span>
+                </button>
+                <div class="brand-actions">
+                    <button class="icon-button theme-quick-toggle" id="quickThemeToggle" type="button"
+                            data-pm-action="toggle-theme" aria-label="Switch to light mode" title="Switch theme">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                    <button class="icon-button compose-button" type="button" data-pm-action="new-chat"
+                            aria-label="Start a new chat" title="New chat">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="user-summary">
+                <div class="avatar-container" data-pm-action="profile" role="button" tabindex="0" title="Open profile">
+                    <div class="chat-avatar" id="userAvatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                </div>
+                <div class="user-summary-copy" data-pm-action="profile" role="button" tabindex="0">
+                    <span class="user-summary-label">Your space</span>
+                    <div class="fw-bold" id="userName" dir="auto" data-i18n-ignore>Test User</div>
+                    <div class="text-muted small" id="userStatus" dir="auto" data-i18n-ignore>@testuser</div>
+                </div>
+                <div class="dropdown">
+                    <button class="icon-button" type="button" data-pm-dropdown aria-label="Open menu">
+                        <i class="fas fa-ellipsis-v"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-dark">
+                        <li><a class="dropdown-item" href="#" data-pm-action="new-chat"><i
+                                        class="fas fa-plus me-2"></i>New Chat</a></li>
+                        <li>
+                            <hr class="dropdown-divider">
+                        </li>
+                        <li><a class="dropdown-item" href="#" data-pm-action="profile"><i class="fas fa-user me-2"></i>Profile</a>
+                        </li>
+                        <li><a class="dropdown-item" href="#" data-pm-action="settings"><i class="fas fa-cog me-2"></i>Settings</a>
+                        </li>
+                        <li><a class="dropdown-item" href="#" id="themeToggleMenu" data-pm-action="toggle-theme"><i
+                                        class="fas fa-moon me-2"></i><span id="themeToggleLabel">Light Mode</span></a></li>
+                        <li><a class="dropdown-item" href="#" data-pm-action="logout"><i
+                                        class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="search-shell" role="search">
+                <i class="fas fa-search" aria-hidden="true"></i>
+                <input type="search" class="form-control search-box" placeholder="Search conversations" id="searchInput"
+                       aria-label="Search conversations" aria-controls="chatList settingsList" autocomplete="off" spellcheck="false">
+                <kbd aria-hidden="true">⌘K</kbd>
+                <button class="search-clear" id="searchClear" type="button" aria-label="Clear search" hidden>
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="sidebar-section-label">
+            <span data-mobile-label="Chats">Conversations</span>
+            <span class="sidebar-section-hint">Recent</span>
+        </div>
+
+        <div class="conversation-filters" id="conversationFilters" role="group" aria-label="Conversation filters">
+            <button type="button" class="conversation-filter active" data-conversation-filter="all" aria-pressed="true">
+                All
+            </button>
+            <button type="button" class="conversation-filter" data-conversation-filter="unread" aria-pressed="false">
+                Unread <span class="filter-count" id="unreadFilterCount" hidden>0</span>
+            </button>
+        </div>
+
+        <!-- Chat List (Default View) -->
+        <div class="chat-list" id="chatList">
+            <div class="chat-list-skeleton" aria-hidden="true">
+                <div class="skeleton-chat"><span></span><i></i><b></b></div>
+                <div class="skeleton-chat"><span></span><i></i><b></b></div>
+                <div class="skeleton-chat"><span></span><i></i><b></b></div>
+            </div>
+        </div>
+
+        <!-- Settings List (Hidden by default) -->
+        <div class="settings-list d-none" id="settingsList">
+            <div class="settings-list-heading">
+                <div>
+                    <span>Personal</span>
+                    <strong id="settingsListTitle" tabindex="-1">Settings</strong>
+                </div>
+                <button type="button" class="icon-button" data-pm-action="close-settings" aria-label="Close settings"
+                        title="Close settings">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="settings-item" data-pm-action="settings-section" data-pm-section="profile" role="button" tabindex="0">
+                <div class="settings-icon settings-icon-profile">
+                    <i class="fas fa-user"></i>
+                </div>
+                <div class="settings-info">
+                    <div class="settings-title">Profile</div>
+                    <div class="settings-description">Edit your profile information</div>
+                </div>
+                <div class="settings-arrow">
+                    <i class="fas fa-chevron-right"></i>
+                </div>
+            </div>
+
+            <div class="settings-item" data-pm-action="settings-section" data-pm-section="account" role="button" tabindex="0">
+                <div class="settings-icon settings-icon-account">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <div class="settings-info">
+                    <div class="settings-title">Account</div>
+                    <div class="settings-description">Password, security settings</div>
+                </div>
+                <div class="settings-arrow">
+                    <i class="fas fa-chevron-right"></i>
+                </div>
+            </div>
+
+            <div class="settings-item" data-pm-action="settings-section" data-pm-section="notifications" role="button" tabindex="0">
+                <div class="settings-icon settings-icon-notifications">
+                    <i class="fas fa-bell"></i>
+                </div>
+                <div class="settings-info">
+                    <div class="settings-title">Notifications</div>
+                    <div class="settings-description">Manage your notifications</div>
+                </div>
+                <div class="settings-arrow">
+                    <i class="fas fa-chevron-right"></i>
+                </div>
+            </div>
+
+            <div class="settings-item" data-pm-action="settings-section" data-pm-section="privacy" role="button" tabindex="0">
+                <div class="settings-icon settings-icon-privacy">
+                    <i class="fas fa-lock"></i>
+                </div>
+                <div class="settings-info">
+                    <div class="settings-title">Privacy &amp; Security</div>
+                    <div class="settings-description">Control your privacy settings</div>
+                </div>
+                <div class="settings-arrow">
+                    <i class="fas fa-chevron-right"></i>
+                </div>
+            </div>
+
+            <div class="settings-item" data-pm-action="settings-section" data-pm-section="appearance" role="button" tabindex="0">
+                <div class="settings-icon settings-icon-appearance">
+                    <i class="fas fa-palette"></i>
+                </div>
+                <div class="settings-info">
+                    <div class="settings-title">Appearance</div>
+                    <div class="settings-description">Theme, font size, chat background</div>
+                </div>
+                <div class="settings-arrow">
+                    <i class="fas fa-chevron-right"></i>
+                </div>
+            </div>
+
+            <div class="settings-item" data-pm-action="settings-section" data-pm-section="storage" role="button" tabindex="0">
+                <div class="settings-icon settings-icon-storage">
+                    <i class="fas fa-hdd"></i>
+                </div>
+                <div class="settings-info">
+                    <div class="settings-title">Storage Usage</div>
+                    <div class="settings-description">Manage your storage and data</div>
+                </div>
+                <div class="settings-arrow">
+                    <i class="fas fa-chevron-right"></i>
+                </div>
+            </div>
+
+            <div class="settings-item" data-pm-action="settings-section" data-pm-section="about" role="button" tabindex="0">
+                <div class="settings-icon settings-icon-about">
+                    <i class="fas fa-info-circle"></i>
+                </div>
+                <div class="settings-info">
+                    <div class="settings-title">About</div>
+                    <div class="settings-description">Version, support, legal</div>
+                </div>
+                <div class="settings-arrow">
+                    <i class="fas fa-chevron-right"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Area -->
+    <div class="chat-area" id="chatArea">
+        <div class="welcome-screen" id="welcomeScreen">
+            <div class="welcome-orbit" aria-hidden="true">
+                <span class="orbit-avatar orbit-avatar-one">M</span>
+                <span class="orbit-avatar orbit-avatar-two">J</span>
+                <span class="orbit-avatar orbit-avatar-three"><i class="fas fa-heart"></i></span>
+                <div class="welcome-icon">
+                    <div class="brand-mark brand-mark-large">
+                        <span>pm</span>
+                        <i></i>
+                    </div>
+                </div>
+            </div>
+            <div class="welcome-kicker"><span></span> Your conversations, uninterrupted</div>
+            <h1>Say what matters.<br><em>Stay close.</em></h1>
+            <p>Private conversations, shared moments, and the people you care about—all in one calm space.</p>
+            <div class="welcome-actions">
+                <button class="btn btn-primary btn-lg" data-pm-action="new-chat">
+                    Start a conversation <i class="fas fa-arrow-right ms-2"></i>
+                </button>
+                <button class="btn btn-outline-primary btn-lg" data-pm-action="settings">
+                    <i class="fas fa-sliders me-2"></i>Personalize
+                </button>
+            </div>
+            <div class="welcome-note">
+                <span><i class="fas fa-lock"></i> Session protected</span>
+                <span><i class="fas fa-bolt"></i> Fast and focused</span>
+            </div>
+        </div>
+        <div class="settings-content d-none" id="settingsContent">
+            <div class="settings-content-header">
+                <button class="settings-back-btn" data-pm-action="settings-root" aria-label="Back to settings categories">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
+                <div class="settings-content-heading">
+                    <span>Settings</span>
+                    <h4 id="settingsTitle">Settings</h4>
+                </div>
+                <button class="settings-detail-close" type="button" data-pm-action="close-settings" aria-label="Close settings">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div id="settingsContentArea">
+                <!-- Settings content will be loaded here -->
+            </div>
+        </div>
+        <div class="d-none" id="chatContent">
+            <div class="chat-header">
+                <!-- Update the chat header hamburger button -->
+                <div class="mobile-chat-back me-3">
+                    <button class="btn btn-link text-white p-0" data-pm-action="back-to-chats" aria-label="Back to conversations">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                </div>
+                <div class="avatar-container me-3">
+                    <div class="chat-avatar" id="chatAvatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="online-indicator d-none" id="onlineIndicator"></div>
+                </div>
+                <div class="chat-header-info">
+                    <div class="chat-header-eyebrow">Direct message</div>
+                    <div class="chat-title" id="chatTitle" dir="auto" data-i18n-ignore>Chat Name</div>
+                    <div class="chat-status" id="chatStatus">last seen recently</div>
+                </div>
+                <button class="icon-button chat-action-button chat-search-button" type="button" data-pm-action="chat-search"
+                        aria-label="Search in chat" title="Search in chat" aria-controls="chatSidePanel"
+                        aria-expanded="false">
+                    <i class="fas fa-search"></i>
+                </button>
+                <button class="icon-button chat-action-button chat-info-button" type="button" data-pm-action="chat-info"
+                        aria-label="Open chat information" title="Chat information" aria-controls="chatSidePanel"
+                        aria-expanded="false">
+                    <i class="fas fa-circle-info"></i>
+                </button>
+                <div class="dropdown">
+                    <button class="icon-button chat-action-button" type="button" data-pm-dropdown
+                            aria-label="More chat options">
+                        <i class="fas fa-ellipsis-v"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+                        <li><a class="dropdown-item" href="#" data-pm-action="new-chat"><i
+                                        class="fas fa-plus me-2"></i>New Chat</a></li>
+                        <li><a class="dropdown-item" href="#" data-pm-action="chat-info"><i
+                                        class="fas fa-info-circle me-2"></i>Chat Info</a></li>
+                        <li><a class="dropdown-item" href="#" data-pm-action="chat-search"><i
+                                        class="fas fa-search me-2"></i>Search in Chat</a></li>
+                        <li><a class="dropdown-item" href="#" data-pm-action="chat-pref-selected-pin"><i
+                                        class="fas fa-thumbtack me-2"></i><span data-active-chat-pref-label="pin">Pin on this device</span></a></li>
+                        <li><a class="dropdown-item" href="#" data-pm-action="chat-pref-selected-mute"><i
+                                        class="fas fa-eye-low-vision me-2"></i><span data-active-chat-pref-label="mute">Reduce prominence on this device</span></a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="#" data-pm-action="settings"><i
+                                        class="fas fa-sliders me-2"></i>Settings</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="typing-indicator" id="typingIndicator" role="status" aria-live="polite" aria-atomic="true">
+                <bdi id="typingUsers" data-i18n-ignore></bdi><span class="typing-copy"> is typing</span>
+                <span class="typing-dots">
+                        <span>.</span>
+                        <span>.</span>
+                        <span>.</span>
+                    </span>
+            </div>
+
+            <div class="messages-container" id="messagesContainer" role="region" tabindex="0"
+                 aria-label="Conversation messages" data-drop-label="Drop files here to send">
+                <div class="loading-indicator" id="loadingIndicator" role="status" aria-live="polite">
+                    <i class="fas fa-spinner fa-spin me-2"></i>
+                    Loading messages...
+                </div>
+                <div class="messages-list" id="messagesList" role="log" aria-live="polite"
+                     aria-relevant="additions" aria-atomic="false">
+                    <!-- Messages will be populated here -->
+                </div>
+            </div>
+
+            <div class="message-input-container">
+                <div id="attachmentPreview" class="attachment-preview d-none">
+                    <div id="previewContent"></div>
+                    <button class="btn btn-sm btn-outline-secondary" data-pm-action="clear-attachment">
+                        <i class="fas fa-times"></i> Remove
+                    </button>
+                </div>
+                <div class="voice-recording-shell">
+                    <span class="voice-recording-indicator" aria-hidden="true"></span>
+                    <span class="voice-recording-status" id="voiceRecordingStatus" role="status" aria-live="assertive"
+                          aria-atomic="true" hidden>Requesting microphone…</span>
+                    <button class="voice-control voice-control-cancel" type="button" data-pm-action="voice-cancel"
+                            aria-label="Cancel voice recording">
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                    </button>
+                    <button class="voice-control voice-control-stop" type="button" data-pm-action="voice-preview"
+                            aria-label="Stop voice recording">
+                        <i class="fas fa-stop" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="voice-preview" id="voicePreview" role="group" aria-labelledby="voicePreviewTitle" hidden>
+                    <div class="voice-preview-copy">
+                        <span class="voice-preview-icon" aria-hidden="true"><i class="fas fa-microphone"></i></span>
+                        <span>
+                            <strong id="voicePreviewTitle">Voice message ready</strong>
+                            <small id="voicePreviewMeta">Preview before sending</small>
+                        </span>
+                    </div>
+                    <audio id="voicePreviewAudio" controls preload="metadata" aria-label="Voice message preview"></audio>
+                    <div class="voice-preview-actions">
+                        <button class="voice-preview-button" type="button" data-pm-action="voice-cancel">
+                            <i class="fas fa-trash" aria-hidden="true"></i><span>Discard</span>
+                        </button>
+                        <button class="voice-preview-button voice-preview-send" type="button" data-pm-action="voice-send">
+                            <i class="fas fa-paper-plane" aria-hidden="true"></i><span>Send voice</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="emoji-picker" id="emojiPicker" role="dialog" aria-modal="false"
+                     aria-labelledby="emojiPickerTitle" hidden>
+                    <div class="emoji-picker-header">
+                        <div>
+                            <span>Express yourself</span>
+                            <strong id="emojiPickerTitle">Choose an emoji</strong>
+                        </div>
+                        <button class="emoji-picker-close" type="button" data-pm-action="emoji-picker-close"
+                                aria-label="Close emoji picker">
+                            <i class="fas fa-times" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                    <div class="emoji-search-field">
+                        <i class="fas fa-search" aria-hidden="true"></i>
+                        <label class="visually-hidden" for="emojiSearchInput">Search emoji</label>
+                        <input type="search" id="emojiSearchInput" placeholder="Search emoji"
+                               data-pm-input="emoji-search" autocomplete="off" spellcheck="false"
+                               aria-controls="emojiGrid">
+                    </div>
+                    <div class="emoji-grid" id="emojiGrid" role="listbox"
+                         aria-label="Emoji choices" aria-describedby="emojiPickerHelp">
+                        <!-- Populated from the bundled, fixed emoji list. -->
+                    </div>
+                    <p id="emojiPickerHelp">Use the arrow keys to move, then press Enter to insert.</p>
+                </div>
+                <div class="composer-shell d-flex align-items-end" role="group" aria-label="Message composer">
+                    <button class="composer-action" type="button" data-pm-action="attachment-options" aria-label="Add attachment">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    <button class="composer-action emoji-trigger" type="button" data-pm-action="emoji-picker"
+                            aria-label="Choose an emoji" aria-controls="emojiPicker" aria-expanded="false">
+                        <i class="far fa-face-smile" aria-hidden="true"></i>
+                    </button>
+                    <div class="flex-grow-1">
+                            <textarea class="form-control message-input" placeholder="Type a message..." dir="auto"
+                                      id="messageInput" rows="1" data-pm-keypress="message"
+                                      data-pm-input="typing" aria-label="Message" maxlength="10000"></textarea>
+                    </div>
+                    <button class="composer-action voice-trigger" type="button" data-pm-action="voice-record"
+                            aria-label="Record a voice message" aria-controls="voiceRecordingStatus voicePreview"
+                            aria-pressed="false">
+                        <i class="fas fa-microphone" aria-hidden="true"></i>
+                    </button>
+                    <button class="btn send-btn" type="button" data-pm-action="send-message" aria-label="Send message">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+                <input type="file" id="fileInput" class="visually-hidden" data-pm-change="file-select">
+            </div>
+        </div>
+    </div>
+    <aside class="chat-side-panel" id="chatSidePanel" aria-labelledby="chatSidePanelTitle" aria-hidden="true" hidden>
+        <header class="chat-side-panel-header">
+            <div>
+                <span>Conversation tools</span>
+                <h2 id="chatSidePanelTitle" tabindex="-1">Search</h2>
+            </div>
+            <button class="chat-side-panel-close" type="button" data-pm-action="side-panel-close"
+                    aria-label="Close conversation panel">
+                <i class="fas fa-times" aria-hidden="true"></i>
+            </button>
+        </header>
+        <div class="chat-side-panel-tabs" role="tablist" aria-label="Conversation panel">
+            <button id="chatSideSearchTab" type="button" role="tab" data-pm-action="side-panel-search"
+                    data-chat-panel-view="search" aria-selected="true" aria-pressed="true"
+                    aria-controls="chatSidePanelSearchView">
+                <i class="fas fa-search" aria-hidden="true"></i><span>Search</span>
+            </button>
+            <button id="chatSideInfoTab" type="button" role="tab" data-pm-action="side-panel-info"
+                    data-chat-panel-view="info" aria-selected="false" aria-pressed="false"
+                    aria-controls="chatSidePanelInfoView" tabindex="-1">
+                <i class="fas fa-circle-info" aria-hidden="true"></i><span>Info</span>
+            </button>
+        </div>
+        <section class="chat-side-panel-view" id="chatSidePanelSearchView" role="tabpanel"
+                 aria-labelledby="chatSideSearchTab">
+            <div class="chat-side-search-field">
+                <i class="fas fa-search" aria-hidden="true"></i>
+                <label class="visually-hidden" for="chatSideSearchInput">Search this conversation</label>
+                <input type="search" id="chatSideSearchInput" placeholder="Search this conversation" maxlength="100"
+                       data-pm-input="chat-side-search" autocomplete="off" spellcheck="false"
+                       aria-controls="chatSideSearchResults" aria-describedby="chatSideSearchHelp">
+                <button type="button" data-pm-action="chat-side-search-clear" aria-label="Clear conversation search" hidden>
+                    <i class="fas fa-times" aria-hidden="true"></i>
+                </button>
+            </div>
+            <p class="chat-side-search-help" id="chatSideSearchHelp">Enter at least two characters.</p>
+            <div class="chat-side-search-toolbar">
+                <span id="chatSideSearchStatus" role="status" aria-live="polite">Ready to search</span>
+                <output id="chatSideSearchCount" aria-label="Search result count">0 results</output>
+                <div class="chat-side-search-navigation" aria-label="Search result navigation">
+                    <button type="button" data-pm-action="chat-side-search-prev" aria-label="Previous search result" disabled>
+                        <i class="fas fa-chevron-up" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" data-pm-action="chat-side-search-next" aria-label="Next search result" disabled>
+                        <i class="fas fa-chevron-down" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="chat-side-search-results" id="chatSideSearchResults" role="region"
+                 aria-label="Message search results" aria-busy="false">
+                <div class="chat-side-panel-empty" role="status">
+                    <span><i class="fas fa-message" aria-hidden="true"></i></span>
+                    <strong>Find a message</strong>
+                    <p>Search by words used in this conversation.</p>
+                </div>
+            </div>
+        </section>
+        <section class="chat-side-panel-view" id="chatSidePanelInfoView" role="tabpanel"
+                 aria-labelledby="chatSideInfoTab" hidden>
+            <div id="chatSideInfoContent" aria-live="polite">
+                <div class="chat-side-panel-empty" role="status">
+                    <span><i class="fas fa-circle-info" aria-hidden="true"></i></span>
+                    <strong>Conversation details</strong>
+                    <p>Open a chat to view its profile and shared information.</p>
+                </div>
+            </div>
+        </section>
+    </aside>
+</div>
+
+<!-- Mobile Sidebar Overlay -->
+<div class="sidebar-overlay" id="sidebarOverlay" data-pm-action="hide-sidebar"></div>
+<!-- Updated Login Modal with 2FA Support -->
+<div class="modal fade" id="loginModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered auth-dialog">
+        <div class="modal-content">
+            <div class="modal-header auth-header">
+                <div class="brand-mark" aria-hidden="true">
+                    <span>pm</span>
+                    <i></i>
+                </div>
+                <div>
+                    <div class="auth-kicker">Welcome to Messenger</div>
+                    <h5 class="modal-title">Pick up where you left off.</h5>
+                    <p>Meaningful conversations, without the noise.</p>
+                </div>
+                <label class="auth-language-control" for="authLanguage">
+                    <span class="visually-hidden">Interface Language</span>
+                    <i class="fas fa-language" aria-hidden="true"></i>
+                    <select id="authLanguage" data-pm-action="change-locale" aria-label="Interface Language">
+                        <option value="auto">System default</option>
+                        <option value="en" data-i18n-ignore>English</option>
+                        <option value="es" data-i18n-ignore>Español</option>
+                        <option value="zh-Hans" data-i18n-ignore>简体中文</option>
+                        <option value="zh-Hant" data-i18n-ignore>繁體中文</option>
+                        <option value="ar" data-i18n-ignore>العربية</option>
+                    </select>
+                </label>
+            </div>
+            <div class="modal-body">
+                <!-- Login/Register Tabs -->
+                <div id="loginRegisterTabs">
+                    <ul class="nav nav-tabs mb-3" id="loginTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="login-tab" data-bs-toggle="tab" data-bs-target="#login"
+                                    type="button" role="tab">
+                                Login
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="register-tab" data-bs-toggle="tab" data-bs-target="#register"
+                                    type="button" role="tab">
+                                Register
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content" id="loginTabContent">
+                        <!-- Login Tab -->
+                        <div class="tab-pane fade show active" id="login" role="tabpanel">
+                            <form data-pm-submit="login" id="loginForm">
+                                <div class="mb-3">
+                                    <label for="loginUsername" class="form-label">Username or Email</label>
+                                    <input type="text" class="form-control" id="loginUsername" autocomplete="username" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="loginPassword" class="form-label">Password</label>
+                                    <input type="password" class="form-control" id="loginPassword"
+                                           autocomplete="current-password" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100" id="loginSubmitBtn">
+                                    <span class="btn-text">Login</span>
+                                    <span class="btn-spinner d-none">
+                                        <i class="fas fa-spinner fa-spin me-2"></i>Logging in...
+                                    </span>
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- Register Tab -->
+                        <div class="tab-pane fade" id="register" role="tabpanel">
+                            <form data-pm-submit="register" id="registerForm">
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="registerFirstName" class="form-label">First Name</label>
+                                        <input type="text" class="form-control" id="registerFirstName"
+                                               autocomplete="given-name" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="registerLastName" class="form-label">Last Name</label>
+                                        <input type="text" class="form-control" id="registerLastName"
+                                               autocomplete="family-name" required>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="registerUsername" class="form-label">Username</label>
+                                    <input type="text" class="form-control" id="registerUsername"
+                                           autocomplete="username" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="registerEmail" class="form-label">Email</label>
+                                    <input type="email" class="form-control" id="registerEmail" autocomplete="email" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="registerPassword" class="form-label">Password</label>
+                                    <input type="password" class="form-control" id="registerPassword"
+                                           autocomplete="new-password" minlength="12" maxlength="72" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100" id="registerSubmitBtn">
+                                    <span class="btn-text">Register</span>
+                                    <span class="btn-spinner d-none">
+                                        <i class="fas fa-spinner fa-spin me-2"></i>Creating account...
+                                    </span>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2FA Verification (Hidden by default) -->
+                <div id="twoFactorVerification" class="d-none">
+                    <div class="text-center mb-4">
+                        <i class="fas fa-shield-alt fa-3x text-primary mb-3"></i>
+                        <h5>Two-Factor Authentication</h5>
+                        <p class="text-muted">Enter the 6-digit code from your authenticator app or use a backup code.</p>
+                    </div>
+
+                    <form data-pm-submit="verify-2fa" id="twoFactorForm">
+                        <div class="mb-3">
+                            <label for="twoFactorCode" class="form-label">Verification Code</label>
+                            <input type="text" class="form-control text-center" id="twoFactorCode"
+                                   placeholder="000000" maxlength="8" required
+                                   inputmode="text" autocomplete="one-time-code">
+                            <div class="form-text">Enter your 6-digit code or 8-character backup code</div>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary" id="verify2FABtn">
+                                <span class="btn-text">Verify &amp; Login</span>
+                                <span class="btn-spinner d-none">
+                                    <i class="fas fa-spinner fa-spin me-2"></i>Verifying...
+                                </span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" data-pm-action="back-to-login">
+                                <i class="fas fa-arrow-left me-2"></i>Back to Login
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast Container for Notifications -->
+<div class="toast-container position-fixed">
+    <div id="mainToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-snackbar">
+            <span class="toast-icon-shell"><i class="toast-icon fas fa-info-circle"></i></span>
+            <div class="toast-copy">
+                <strong class="toast-title">Messenger</strong>
+                <div class="toast-body"><!-- Toast message will be inserted here --></div>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Dismiss notification"></button>
+        </div>
+    </div>
+</div>
+
+<!-- Confirmation Modal -->
+<div class="modal fade" id="confirmModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="confirm-icon me-2"></i>
+                    <span class="confirm-title">Confirm Action</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="confirm-message">Are you sure you want to perform this action?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn confirm-btn" id="confirmActionBtn">Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- Chat Search Modal -->
+<div class="modal fade" id="chatSearchModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title modal-title-rich">
+                    <span class="modal-title-icon"><i class="fas fa-search"></i></span>
+                    <span><strong>Search in chat</strong><small>Find a message in this conversation</small></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-search-field">
+                    <i class="fas fa-search" aria-hidden="true"></i>
+                    <label class="visually-hidden" for="chatSearchInput">Search this conversation</label>
+                    <input type="search" class="form-control" placeholder="Search messages..." maxlength="100"
+                           id="chatSearchInput" data-pm-input="chat-search" autocomplete="off"
+                           aria-controls="chatSearchResults" aria-describedby="chatSearchStatus">
+                </div>
+                <div id="chatSearchStatus" class="modal-search-status" role="status" aria-live="polite">
+                    Enter at least two characters.
+                </div>
+                <div id="chatSearchResults" class="search-results">
+                    <div class="modal-empty-state">
+                        <span><i class="fas fa-message"></i></span>
+                        <strong>Find a message</strong>
+                        <p>Enter at least two characters to search.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Chat Info Modal -->
+<div class="modal fade" id="chatInfoModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title modal-title-rich">
+                    <span class="modal-title-icon"><i class="fas fa-circle-info"></i></span>
+                    <span><strong>Chat details</strong><small>Members, media, and conversation info</small></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="chatInfoContent">
+                    <!-- Chat info will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- User Profile Modal -->
+<div class="modal fade" id="userProfileModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title modal-title-rich">
+                    <span class="modal-title-icon"><i class="fas fa-user"></i></span>
+                    <span><strong>User profile</strong><small>Contact details and shared conversation</small></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="userProfileContent">
+                    <!-- User profile will be populated here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="sendMessageBtn" data-pm-action="chat-from-profile">
+                    <i class="fas fa-paper-plane me-2"></i>Send Message
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Attachment Options Modal -->
+<div class="modal fade" id="attachmentModal" tabindex="-1">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title modal-title-rich">
+                    <span class="modal-title-icon"><i class="fas fa-paperclip"></i></span>
+                    <span><strong>Send attachment</strong><small>Choose what you want to share</small></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="attachment-options">
+                    <div class="attachment-option" data-pm-action="select-file-type" data-pm-file-accept="image/*" role="button" tabindex="0">
+                        <i class="fas fa-image"></i>
+                        <span>Photo</span>
+                    </div>
+                    <div class="attachment-option" data-pm-action="select-file-type"
+                         data-pm-file-accept=".pdf,.txt,.csv,.rtf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip"
+                         role="button" tabindex="0">
+                        <i class="fas fa-file"></i>
+                        <span>Document</span>
+                    </div>
+                    <div class="attachment-option" data-pm-action="select-file-type" data-pm-file-accept="audio/*" role="button" tabindex="0">
+                        <i class="fas fa-music"></i>
+                        <span>Audio</span>
+                    </div>
+                    <div class="attachment-option" data-pm-action="select-file-type" data-pm-file-accept="video/*" role="button" tabindex="0">
+                        <i class="fas fa-video"></i>
+                        <span>Video</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Forward Modal -->
+<div class="modal fade forward-modal" id="forwardModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title modal-title-rich">
+                    <span class="modal-title-icon"><i class="fas fa-share"></i></span>
+                    <span><strong>Forward message</strong><small>Share with another conversation</small></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="forward-message-preview" id="forwardMessagePreview">
+                    <!-- Message preview will be shown here -->
+                </div>
+
+                <div class="forward-search modal-search-field">
+                    <i class="fas fa-search" aria-hidden="true"></i>
+                    <input type="search" class="form-control" placeholder="Search chats..."
+                           id="forwardSearchInput" data-pm-input="forward-search" autocomplete="off">
+                </div>
+
+                <div class="forward-chat-list" id="forwardChatList">
+                    <!-- Chat list will be populated here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="d-flex align-items-center justify-content-between w-100">
+                    <div class="forward-selected-count" id="forwardSelectedCount">
+                        0 chats selected
+                    </div>
+                    <div class="ms-auto">
+                        <button type="button" class="btn btn-secondary me-2" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" data-pm-action="send-forwarded-message"
+                                id="forwardSendBtn" disabled>
+                            <i class="fas fa-share me-2"></i>Forward
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Context Menu -->
+<div id="contextMenu" class="context-menu">
+    <div class="context-menu-item" data-pm-action="reply-message" role="button" tabindex="0">
+        <i class="fas fa-reply"></i>Reply
+    </div>
+    <div class="context-menu-item" data-pm-action="copy-message" role="button" tabindex="0">
+        <i class="fas fa-copy"></i>Copy
+    </div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item" data-pm-action="edit-message" role="button" tabindex="0" id="editOption">
+        <i class="fas fa-edit"></i>Edit
+    </div>
+    <div class="context-menu-item" data-pm-action="delete-message" role="button" tabindex="0" id="deleteOption">
+        <i class="fas fa-trash"></i>Delete
+    </div>
+</div>
+
+<!-- Conversation preference menu -->
+<div id="chatRowMenu" class="chat-row-menu" role="menu" aria-label="Conversation preferences" hidden>
+    <button type="button" id="chatRowPinAction" class="chat-row-menu-item" role="menuitemcheckbox"
+            aria-checked="false" data-pm-action="chat-pref-pin">
+        <i class="fas fa-thumbtack" aria-hidden="true"></i>
+        <span id="chatRowPinLabel" data-chat-pref-label="pin">Pin conversation</span>
+    </button>
+    <button type="button" id="chatRowMuteAction" class="chat-row-menu-item" role="menuitemcheckbox"
+            aria-checked="false" data-pm-action="chat-pref-mute">
+        <i class="fas fa-eye-low-vision" aria-hidden="true"></i>
+        <span id="chatRowMuteLabel" data-chat-pref-label="mute">Reduce prominence on this device</span>
+    </button>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-spinner">
+        <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+        <div>Loading...</div>
+    </div>
+</div>
+
+<!-- Image Preview Modal -->
+<div class="modal fade" id="imagePreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-transparent border-0">
+            <div class="modal-header border-0">
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <img id="previewImage" src="" alt="Preview">
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New Chat Modal -->
+<div class="modal fade" id="newChatModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title modal-title-rich">
+                    <span class="modal-title-icon"><i class="fas fa-pen"></i></span>
+                    <span><strong>Start a conversation</strong><small>Find someone by name or username</small></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-search-field">
+                    <i class="fas fa-search" aria-hidden="true"></i>
+                    <input type="search" class="form-control" placeholder="Search people..."
+                           id="userSearchInput" data-pm-input="user-search" autocomplete="off">
+                </div>
+                <div id="userSearchResults">
+                    <div class="modal-empty-state">
+                        <span><i class="fas fa-user-plus"></i></span>
+                        <strong>Start with a name</strong>
+                        <p>Enter at least two characters to find someone.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Mobile Bottom Navigation -->
+<nav class="mobile-bottom-nav" id="mobileBottomNav" aria-label="Primary mobile navigation">
+    <button type="button" class="bottom-nav-item active" data-pm-action="chats-tab" aria-label="Chats"
+            aria-current="page" aria-pressed="true" aria-controls="chatList">
+        <span class="bottom-nav-icon"><i class="fas fa-comments" aria-hidden="true"></i></span>
+        <span>Chats</span>
+    </button>
+    <button type="button" class="bottom-nav-item" data-pm-action="explore-tab" aria-label="Start a new conversation"
+            aria-pressed="false" aria-controls="newChatModal">
+        <span class="bottom-nav-icon"><i class="fas fa-plus" aria-hidden="true"></i></span>
+        <span>New</span>
+    </button>
+    <button type="button" class="bottom-nav-item" data-pm-action="me-tab" aria-label="Your settings"
+            aria-pressed="false" aria-controls="settingsList settingsContent">
+        <span class="bottom-nav-icon"><i class="fas fa-sliders" aria-hidden="true"></i></span>
+        <span>Settings</span>
+    </button>
+</nav>
+<!-- Bootstrap JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"
+        data-cfasync="false"
+        integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz"
+        crossorigin="anonymous"></script>
+<!-- jQuery -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.0/jquery.min.js"
+        data-cfasync="false"
+        integrity="sha384-NXgwF8Kv9SSAr+jemKKcbvQsz+teULH/a5UNJvZc6kP47hZgl62M1vGnw6gHQhb1"
+        crossorigin="anonymous"></script>
+
+<script src="assets/js/i18n.js?v=20260926.3" data-cfasync="false"></script>
+<script src="assets/js/script-ori_2025-06-07_02.js?v=20260926.3" data-cfasync="false"></script>
+<script src="assets/js/security-hardening.js?v=20260926.3" data-cfasync="false"></script>
+<script src="assets/js/ui-enhancements.js?v=20260926.3" data-cfasync="false"></script>
+<script src="assets/js/csp-events.js?v=20260926.3" data-cfasync="false"></script>
+<script src="assets/js/chat-ux.js?v=20260926.3" data-cfasync="false"></script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+# .htaccess
+Options -Indexes -MultiViews
+
+RewriteEngine On
+
+# Only the API entry points are executable over HTTP. Internal application
+# code, dependencies, CLI services, dotfiles, and PHP path-info are never
+# public resources.
+# Only standard ACME HTTP-01 token names may cross the dot-path boundary.
+RewriteRule ^\.well-known/acme-challenge/[A-Za-z0-9_-]+$ - [L]
+RewriteRule "(^|/)\." - [F,L,NC]
+RewriteRule ^(?:classes|config|docs|migrations|tests|vendor|websocket)(?:/|$) - [F,L,NC]
+RewriteCond %{REQUEST_URI} !^/api/(?:attachment|auth|avatar|chat|profile|settings)\.php$
+RewriteRule \.php(?:/|$) - [F,L,NC]
+
+# Redirect to HTTPS (uncomment for production)
+# RewriteCond %{HTTPS} off
+# RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Redirect all other requests to index.html (SPA routing)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_URI} !^/api/
+RewriteCond %{REQUEST_URI} !^/uploads/
+RewriteCond %{REQUEST_URI} !^/websocket/
+RewriteRule ^.*$ index.html [L]
+
+# Stop oversized bodies at Apache before PHP parses JSON or multipart data.
+# These values mirror the stricter application limits, including multipart
+# overhead for the two upload endpoints.
+<Files "auth.php">
+    LimitRequestBody 32768
+</Files>
+<Files "settings.php">
+    LimitRequestBody 131072
+</Files>
+<Files "profile.php">
+    LimitRequestBody 6291456
+</Files>
+<Files "chat.php">
+    LimitRequestBody 53477376
+</Files>
+<FilesMatch "^(?:attachment|avatar)\.php$">
+    LimitRequestBody 1024
+</FilesMatch>
+
+# Mark private media requests before the header phase.
+<IfModule mod_setenvif.c>
+    SetEnvIf Request_URI "^/(?:api/(?:attachment|avatar)\.php|uploads(?:/|$))" PM_PRIVATE_MEDIA=1
+</IfModule>
+
+# Security headers
+<IfModule mod_headers.c>
+    # These are secure defaults. API endpoints that intentionally emit a
+    # stricter policy (for example, sandboxed attachments) keep their value.
+    Header always set X-Frame-Options DENY
+    Header always set X-Content-Type-Options nosniff
+    Header always set X-XSS-Protection "0"
+    Header always set Referrer-Policy "no-referrer" env=PM_PRIVATE_MEDIA
+    Header always set Referrer-Policy "strict-origin-when-cross-origin" env=!PM_PRIVATE_MEDIA
+    # The application may request its own microphone after an explicit user
+    # gesture. Private media responses remain incapable of requesting capture.
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()" env=PM_PRIVATE_MEDIA
+    Header always set Permissions-Policy "camera=(), microphone=(self), geolocation=()" env=!PM_PRIVATE_MEDIA
+    Header always set Cross-Origin-Opener-Policy "same-origin"
+    Header always set Cross-Origin-Resource-Policy "same-origin"
+    Header always set Content-Security-Policy "sandbox; default-src 'none'" env=PM_PRIVATE_MEDIA
+    # Inline handlers and dynamic code generation are denied. Uploaded content
+    # is not a script source and every other resource class is closed unless
+    # explicitly needed below.
+    Header always set Content-Security-Policy "default-src 'none'; script-src 'self' https://cdnjs.cloudflare.com; script-src-attr 'none'; style-src 'self' https://cdnjs.cloudflare.com; style-src-attr 'none'; img-src 'self' data: blob:; font-src 'self' https://cdnjs.cloudflare.com; connect-src 'self'; media-src 'self' blob:; manifest-src 'self'; worker-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests" env=!PM_PRIVATE_MEDIA
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    Header always unset X-Powered-By
+</IfModule>
+
+# Deny deployment metadata, credentials, backups, logs, and source maps even
+# if one is accidentally copied into the document root later.
+<FilesMatch "(?i)^(?:composer\.(?:json|lock)|package(?:-lock)?\.json|yarn\.lock|phpunit\.xml(?:\.dist)?|.*~|.*\.(?:env|log|ini|conf|config|bak|backup|old|orig|rej|tmp|temp|swp|swo|sql|sqlite|sqlite3|db|pem|key|p12|pfx|crt|cer|inc|phps|dist|map))$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Cache static assets
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 month"
+    ExpiresByType application/javascript "access plus 1 month"
+    ExpiresByType image/png "access plus 1 month"
+    ExpiresByType image/jpg "access plus 1 month"
+    ExpiresByType image/jpeg "access plus 1 month"
+    ExpiresByType image/gif "access plus 1 month"
+    ExpiresByType image/webp "access plus 1 month"
+</IfModule>
+
+# Gzip compression
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/plain
+    AddOutputFilterByType DEFLATE text/html
+    AddOutputFilterByType DEFLATE text/xml
+    AddOutputFilterByType DEFLATE text/css
+    AddOutputFilterByType DEFLATE application/xml
+    AddOutputFilterByType DEFLATE application/xhtml+xml
+    AddOutputFilterByType DEFLATE application/rss+xml
+    AddOutputFilterByType DEFLATE application/javascript
+    AddOutputFilterByType DEFLATE application/x-javascript
+</IfModule>

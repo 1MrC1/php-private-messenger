@@ -1,0 +1,26 @@
+Options -Indexes -ExecCGI -MultiViews
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Stored media is never addressable through /uploads. Application code
+    # translates database paths to the authenticated PHP delivery endpoints.
+    RewriteRule ^ - [F,L]
+</IfModule>
+
+<IfModule !mod_rewrite.c>
+    Order Allow,Deny
+    Deny from all
+</IfModule>
+
+<IfModule mod_mime.c>
+    RemoveHandler .php .php3 .php4 .php5 .php7 .php8 .phtml .phar .cgi .pl .py .sh
+    RemoveType .php .php3 .php4 .php5 .php7 .php8 .phtml .phar .cgi .pl .py .sh
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Cross-Origin-Resource-Policy "same-origin"
+    Header always set Content-Security-Policy "sandbox; default-src 'none'"
+    Header always set Referrer-Policy "no-referrer"
+</IfModule>
