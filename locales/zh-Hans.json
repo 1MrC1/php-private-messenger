@@ -869,6 +869,7 @@
     "protected.enroll_explainer": "受保护的对话会在每台设备上分别加密。注册此设备需要你的密码和第二因素，因为它会新增一个能够读取后续消息的密钥。",
     "protected.enroll_label": "此设备的名称",
     "protected.enroll_code": "验证码或备用码",
-    "protected.enroll_submit": "设置设备"
+    "protected.enroll_submit": "设置设备",
+    "protected.no_scanning": "受保护对话中的文件不会进行病毒扫描。请只打开你信任的人发来的、且在你预期之中的文件。"
   }
 }

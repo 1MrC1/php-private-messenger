@@ -291,4 +291,61 @@ foreach (['es', 'ar', 'zh-Hans', 'zh-Hant'] as $locale) {
     );
 }
 
+// ---- encrypted attachments -------------------------------------------------
+
+$blobClass = (string)file_get_contents($root . '/classes/EncryptedBlob.php');
+protectedAssert(
+    str_contains($blobClass, 'MalwareScanner') === false,
+    'the encrypted attachment path does not pretend to scan ciphertext'
+);
+protectedAssert(
+    str_contains($blobClass, 'assertProtectionMatches') && str_contains($blobClass, 'isParticipant'),
+    'a blob can only be stored in a protected conversation the uploader is in'
+);
+protectedAssert(
+    str_contains($blobClass, 'hash_equals') && str_contains($blobClass, 'hash_file'),
+    'the stored bytes are hashed and compared rather than trusted'
+);
+protectedAssert(
+    str_contains($blobClass, 'is_link($real)') && str_contains($blobClass, 'strncmp($real, $expectedRoot'),
+    'a blob path is confined to its directory and may not be a symlink'
+);
+protectedAssert(
+    str_contains($blobClass, 'HOURLY_BLOB_BYTES') && str_contains($blobClass, 'HOURLY_BLOB_COUNT'),
+    'encrypted attachments are still charged an hourly quota'
+);
+
+$blobMigration = (string)file_get_contents($root . '/migrations/20260928_add_encrypted_blobs.sql');
+protectedAssert(
+    str_contains($blobMigration, 'CREATE TABLE encrypted_blobs') &&
+        str_contains($blobMigration, 'blobs_outside_protected_chats'),
+    'the migration creates the blob table and ships a check that blobs stay inside protected chats'
+);
+
+$client = (string)file_get_contents($root . '/assets/js/protected-chat.js');
+protectedAssert(
+    str_contains($client, "subtle.generateKey({ name: 'AES-GCM', length: 256 }"),
+    'each attachment gets its own content key'
+);
+protectedAssert(
+    str_contains($client, 'NOT') && str_contains($client, 'a defence against a malicious server'),
+    'the code says plainly that the digest is not what protects the attachment'
+);
+
+$english = json_decode((string)file_get_contents($root . '/locales/en.json'), true)['messages'];
+protectedAssert(
+    str_contains(strtolower($english['protected.no_scanning']), 'not scanned for malware'),
+    'users are told that files in protected conversations are not scanned'
+);
+foreach (['es', 'ar', 'zh-Hans', 'zh-Hant'] as $locale) {
+    $messages = json_decode((string)file_get_contents($root . '/locales/' . $locale . '.json'), true)['messages'];
+    protectedAssert(isset($messages['protected.no_scanning']), $locale . ' carries the scanning caveat');
+}
+
+$page = (string)file_get_contents($root . '/index.html');
+protectedAssert(
+    str_contains($page, 'data-i18n="protected.no_scanning"'),
+    'the caveat is shown, not merely translated'
+);
+
 echo "Protected chat tests passed.\n";

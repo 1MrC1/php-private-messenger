@@ -869,6 +869,7 @@
     "protected.enroll_explainer": "受保護的對話會在每台裝置上分別加密。註冊此裝置需要你的密碼與第二因素，因為它會新增一個能夠讀取後續訊息的金鑰。",
     "protected.enroll_label": "此裝置的名稱",
     "protected.enroll_code": "驗證碼或備用碼",
-    "protected.enroll_submit": "設定裝置"
+    "protected.enroll_submit": "設定裝置",
+    "protected.no_scanning": "受保護對話中的檔案不會進行病毒掃描。請只開啟你信任的人傳來的、且在你預期之中的檔案。"
   }
 }

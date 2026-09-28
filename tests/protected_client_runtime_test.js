@@ -35,6 +35,8 @@ function fakeServer() {
     const handshakes = new Map();       // chatId -> [{sequence, kind, payload}]
     const envelopes = new Map();        // chatId -> [{message_id, ciphertext, ...}]
     const protectedChats = new Set();
+    const blobs = [];
+    const digests = new Map();
     let nextDeviceId = 1;
     let nextMessageId = 1;
     const seen = [];
@@ -85,10 +87,24 @@ function fakeServer() {
                     sender_id: body.__userId,
                     created_at: '2026-09-28 12:00:00',
                     ciphertext: body.envelope.ciphertext,
+                    content_type: body.envelope.content_type,
                 };
                 list.push(row);
                 envelopes.set(body.chat_id, list);
                 return { success: true, message_id: row.message_id };
+            }
+            case 'put_encrypted_blob': {
+                const id = blobs.length + 1;
+                blobs.push({ id, chat_id: body.chat_id, ciphertext: body.ciphertext });
+                const digest = require('node:crypto').createHash('sha256')
+                    .update(Buffer.from(body.ciphertext, 'base64')).digest('base64');
+                digests.set(id, digest);
+                return { success: true, blob_id: id, byte_size: Buffer.from(body.ciphertext, 'base64').length, sha256: digest };
+            }
+            case 'get_encrypted_blob': {
+                const blob = blobs.find((entry) => entry.id === body.blob_id);
+                if (!blob) return { success: false, error_code: 'unknown_blob', message: 'unknown' };
+                return { success: true, blob_id: blob.id, ciphertext: blob.ciphertext, sha256: digests.get(blob.id) };
             }
             case 'get_protected_envelopes': {
                 const list = envelopes.get(body.chat_id) || [];
@@ -99,7 +115,7 @@ function fakeServer() {
         }
     }
 
-    return { post, devices, envelopes, handshakes, seen };
+    return { post, devices, envelopes, handshakes, seen, blobs };
 }
 
 (async () => {
@@ -209,6 +225,41 @@ function fakeServer() {
         'a conversation is refused rather than formed without a device that cannot be admitted'
     );
     console.log('PASS: exhausted key packages refuse the conversation instead of excluding a device');
+
+    // ---- encrypted attachments --------------------------------------------
+
+    const fileBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const sentAttachment = await ada.sendAttachment(42, started.groupId, 'score.pdf', fileBytes);
+    assert.ok(sentAttachment.blobId > 0, 'the attachment is uploaded');
+
+    const storedBlob = Buffer.from(server.blobs[0].ciphertext, 'base64');
+    assert.ok(!storedBlob.includes(Buffer.from(fileBytes)),
+        'the stored blob does not contain the file');
+    assert.ok(!Buffer.from(server.envelopes.get(42).slice(-1)[0].ciphertext, 'base64')
+        .includes(Buffer.from('score.pdf')),
+        'the file name is inside the sealed envelope, not visible to the server');
+    console.log('PASS: the server stores an encrypted blob and cannot see the file or its name');
+
+    const withAttachment = await miraAgain.receive(42, sync.groupId, sentAttachment.messageId - 1);
+    const descriptor = withAttachment.find((message) => message.attachment);
+    assert.ok(descriptor, 'the recipient sees an attachment message');
+    assert.equal(descriptor.attachment.name, 'score.pdf', 'the file name travels inside the envelope');
+    assert.equal(descriptor.text, null, 'an attachment is not presented as text');
+
+    const opened = await miraAgain.openAttachment(descriptor.attachment);
+    assert.deepEqual(Array.from(opened.bytes), Array.from(fileBytes),
+        'the recipient recovers the exact file');
+    console.log('PASS: the recipient decrypts the attachment back to the original bytes');
+
+    // A server that swaps the blob must not be able to produce something that
+    // decrypts. Note it also controls the digest it reports, so the digest is
+    // not what saves us here -- AES-GCM authentication is, because the key came
+    // through the sealed envelope rather than from the server.
+    server.blobs[0].ciphertext = Buffer.from('tampered payload that is the wrong thing').toString('base64');
+    await assert.rejects(() => miraAgain.openAttachment(descriptor.attachment),
+        (error) => error instanceof Error || error instanceof DOMException,
+        'a swapped blob fails to decrypt rather than yielding plausible bytes');
+    console.log('PASS: a substituted attachment fails authentication');
 
     console.log('Protected client runtime tests passed.');
 })().catch((error) => {

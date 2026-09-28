@@ -295,17 +295,132 @@
                 } catch (error) {
                     readable = false;
                 }
+                let attachment = null;
+                if (readable && envelope.content_type === 2) {
+                    try {
+                        const descriptor = JSON.parse(text);
+                        if (descriptor && descriptor.kind === 'attachment') {
+                            attachment = descriptor;
+                            text = null;
+                        }
+                    } catch (error) {
+                        readable = false;
+                        text = null;
+                    }
+                }
                 messages.push({
                     messageId: envelope.message_id,
                     senderId: envelope.sender_id,
                     createdAt: envelope.created_at,
+                    contentType: envelope.content_type,
                     readable,
                     text,
+                    attachment,
                 });
             }
 
             await saveSession();
             return messages;
+        }
+
+        // ---- attachments ----------------------------------------------------
+
+        /**
+         * Encrypt a file, upload the ciphertext, and send the key inside the
+         * sealed message.
+         *
+         * The content key lives in the envelope, which is itself encrypted to
+         * the group, so the server holds bytes it cannot decrypt and a key it
+         * never sees. It also cannot scan those bytes for malware, which is why
+         * the interface says so.
+         */
+        async function sendAttachment(chatId, groupIdBase64, fileName, bytes) {
+            await requireSession();
+
+            const key = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
+                'encrypt',
+                'decrypt',
+            ]);
+            const iv = randomBytes(12);
+            const ciphertext = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes));
+
+            const upload = await post('api/chat.php', {
+                action: 'put_encrypted_blob',
+                chat_id: chatId,
+                ciphertext: toBase64(ciphertext),
+            });
+            if (!upload || upload.success !== true) {
+                throw new Error((upload && upload.message) || 'Could not upload the attachment');
+            }
+
+            const descriptor = {
+                kind: 'attachment',
+                blob_id: upload.blob_id,
+                name: fileName,
+                size: bytes.length,
+                key: toBase64(new Uint8Array(await subtle.exportKey('raw', key))),
+                iv: toBase64(iv),
+                sha256: upload.sha256,
+            };
+
+            const groupId = fromBase64(groupIdBase64);
+            const sealed = session.seal(groupId, encoder.encode(JSON.stringify(descriptor)));
+            await saveSession();
+
+            const response = await post('api/chat.php', {
+                action: 'send_protected_message',
+                chat_id: chatId,
+                envelope: {
+                    envelope_version: 1,
+                    content_type: 2,
+                    epoch: 0,
+                    sender_leaf: 0,
+                    group_id: groupIdBase64,
+                    aad_digest: toBase64(new Uint8Array(32)),
+                    ciphertext: toBase64(sealed),
+                },
+            });
+            if (!response || response.success !== true) {
+                throw new Error((response && response.message) || 'Could not send the attachment');
+            }
+            return { messageId: response.message_id, blobId: upload.blob_id };
+        }
+
+        /**
+         * Fetch and decrypt an attachment previously described by a message.
+         *
+         * What actually protects this is AES-GCM: the key travels inside the
+         * sealed envelope, so a server that substitutes the blob cannot produce
+         * bytes that authenticate. The digest comparison below is a cheap check
+         * against accidental corruption and a mismatched reference -- it is NOT
+         * a defence against a malicious server, because the same server supplies
+         * it and could return a matching one for whatever it served.
+         */
+        async function openAttachment(descriptor) {
+            const response = await post('api/chat.php', {
+                action: 'get_encrypted_blob',
+                blob_id: descriptor.blob_id,
+            });
+            if (!response || response.success !== true) {
+                throw new Error((response && response.message) || 'Could not fetch the attachment');
+            }
+            if (response.sha256 !== descriptor.sha256) {
+                throw new Error('That attachment is not the one the message described');
+            }
+
+            const key = await subtle.importKey(
+                'raw',
+                fromBase64(descriptor.key),
+                { name: 'AES-GCM' },
+                false,
+                ['decrypt']
+            );
+            const plain = await subtle.decrypt(
+                { name: 'AES-GCM', iv: fromBase64(descriptor.iv) },
+                key,
+                fromBase64(response.ciphertext)
+            );
+            return { name: descriptor.name, bytes: new Uint8Array(plain) };
         }
 
         async function requireSession() {
@@ -314,7 +429,7 @@
             }
         }
 
-        return { resume, enroll, startConversation, syncGroup, send, receive };
+        return { resume, enroll, startConversation, syncGroup, send, receive, sendAttachment, openAttachment };
     }
 
     // ---- small helpers -----------------------------------------------------

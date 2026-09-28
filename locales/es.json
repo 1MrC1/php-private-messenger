@@ -869,6 +869,7 @@
     "protected.enroll_explainer": "Las conversaciones protegidas se cifran por separado en cada dispositivo. Registrar este requiere tu contraseña y un segundo factor, porque añade una clave capaz de leer los mensajes futuros.",
     "protected.enroll_label": "Nombre de este dispositivo",
     "protected.enroll_code": "Código de verificación o de respaldo",
-    "protected.enroll_submit": "Configurar dispositivo"
+    "protected.enroll_submit": "Configurar dispositivo",
+    "protected.no_scanning": "Los archivos en conversaciones protegidas no se analizan en busca de malware. Abre solo lo que esperas de alguien en quien confías."
   }
 }

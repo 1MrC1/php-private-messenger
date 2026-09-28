@@ -104,11 +104,26 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    symbol implies a guarantee this does not have, and a test fails if one
    appears.
 
-   Still missing, each tracked as an issue: starting a protected conversation
-   from the interface, including the enrollment dialog (#5); encrypted
-   attachments, which also means losing server-side malware scanning (#6); and
-   the independent review of this integration, which is the gate before the
-   words "end-to-end encrypted" may be used anywhere (#7).
+7. **The interface**: an option when starting a conversation, an enrollment
+   dialog demanding the password and a second factor, sending routed through the
+   encrypting client, and decrypted text written into the rows the existing
+   renderer drew.
+
+8. **Encrypted attachments**: each file gets a fresh AES-GCM content key, the
+   ciphertext goes to a separate blob store, and the key travels inside the
+   sealed envelope. The server therefore **cannot scan these files for
+   malware** — the ordinary pipeline's MIME allow-list, image and archive
+   parsing and fail-closed ClamAV scan all need readable bytes. The interface
+   states that loss in all five languages rather than hiding it.
+
+   Note what actually protects an attachment: AES-GCM authentication, because
+   the key came through the sealed envelope. The digest the server reports is a
+   check against corruption, not against the server itself, which could report a
+   digest matching whatever it served.
+
+   What remains is the one thing that cannot be written: the independent review
+   of this integration (#7). Until it happens the wording stays as it is —
+   "experimental", "unaudited", and never "end-to-end encrypted".
 
 ## Prerequisite: nothing else may serve script into this origin
 

@@ -5,6 +5,7 @@ require_once __DIR__ . '/../classes/I18n.php';
 require_once __DIR__ . '/../classes/Chat.php';
 require_once __DIR__ . '/../classes/ProtectedChat.php';
 require_once __DIR__ . '/../classes/DeviceDirectory.php';
+require_once __DIR__ . '/../classes/EncryptedBlob.php';
 
 Auth::configureSession();
 Auth::setPrivateResponseHeaders();
@@ -685,6 +686,55 @@ try {
                             ),
                         ];
                         break;
+                }
+            } catch (ProtectedChatMismatch $mismatch) {
+                $response = [
+                    'success' => false,
+                    'message' => 'The request is invalid',
+                    'error_code' => $mismatch->errorCode(),
+                    'http_status' => 409,
+                ];
+            }
+            break;
+
+        case 'put_encrypted_blob':
+        case 'get_encrypted_blob':
+            // Encrypted attachments. The server stores and returns bytes it
+            // cannot inspect: no MIME sniffing, no image or archive parsing,
+            // and no malware scan, because none of them work on ciphertext.
+            // That loss is surfaced in the interface, not hidden here.
+            $blobChats = new ProtectedChat();
+            if (!$blobChats->supportsProtectedChats()) {
+                $response = [
+                    'success' => false,
+                    'message' => 'The request could not be completed',
+                    'error_code' => 'protected_chats_unavailable',
+                    'http_status' => 503,
+                ];
+                break;
+            }
+            try {
+                $blobs = new EncryptedBlob();
+                if ($input['action'] === 'put_encrypted_blob') {
+                    $blobChatId = requirePositiveApiId($input['chat_id'] ?? null, 'Chat ID');
+                    $ciphertext = ProtectedChat::decodeBounded(
+                        (string)($input['ciphertext'] ?? ''),
+                        EncryptedBlob::MAX_BLOB_BYTES,
+                        'attachment'
+                    );
+                    $response = ['success' => true] + $blobs->store(
+                        (int)$currentUser['id'],
+                        $blobChatId,
+                        $ciphertext,
+                        $blobChats
+                    );
+                } else {
+                    $blobId = requirePositiveApiId($input['blob_id'] ?? null, 'Attachment ID');
+                    $response = ['success' => true] + $blobs->fetch(
+                        (int)$currentUser['id'],
+                        $blobId,
+                        $blobChats
+                    );
                 }
             } catch (ProtectedChatMismatch $mismatch) {
                 $response = [
