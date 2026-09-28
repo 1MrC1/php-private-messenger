@@ -137,7 +137,23 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    `tests/mls_session_runtime_test.js` requires that a removed device cannot
    read what is sent after its removal.
 
-10. **Conformance against the published answers**: the MLS working group's own
+10. **Staying in step, and a bug this found**: a membership change moves the
+   committer to a new epoch. Until now nothing applied those commits on the
+   other devices, so every existing member was left in the old epoch and would
+   have stopped being able to read as soon as anyone was added or removed — and
+   there was no way to admit a device enrolled after a conversation started, or
+   to remove one at all. `apply_handshake()` applies a commit found in the
+   server's queue, reporting `applied`, `already-applied`, `unknown-group`,
+   `proposal` or `not-a-handshake` instead of throwing, because a client walking
+   a shared queue must be able to tell "not mine" from "broken". `admitDevices()`
+   adds a later device and skips any already in the group, which otherwise gets
+   two leaves. `removeMember()` publishes a removal.
+
+   Envelopes now declare the epoch and leaf they really came from, read from the
+   group rather than sent as `0`. That constant had quietly disabled the server's
+   epoch-rollback check, and a test now fails if it returns.
+
+11. **Conformance against the published answers**: the MLS working group's own
    RFC 9420 known-answer tests run in `crypto/tests/rfc9420_vectors.rs` — tree
    math and the key schedule through OpenMLS's own runners, `crypto-basics`
    through the provider this project compiles in. The vectors are pinned by

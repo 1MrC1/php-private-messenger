@@ -34,6 +34,85 @@ protectedAssert(
     'the plaintext fingerprint still distinguishes content'
 );
 
+// ---- envelope shape: every rejection has a name ---------------------------
+// These run without a database on purpose: the checks are decidable from the
+// envelope alone, and the checklist in issue #7 asks for each refusal to be a
+// named test rather than a claim in a comment.
+
+$goodEnvelope = [
+    'envelope_version' => ProtectedChat::ENVELOPE_VERSION,
+    'content_type' => 1,
+    'epoch' => 3,
+    'sender_leaf' => 1,
+    'group_id' => base64_encode(str_repeat("\x22", 32)),
+    'aad_digest' => base64_encode(str_repeat("\x33", 32)),
+    'ciphertext' => base64_encode('sealed-bytes'),
+];
+
+$parsed = ProtectedChat::parseEnvelope($goodEnvelope);
+protectedAssert(
+    $parsed['epoch'] === 3 && $parsed['sender_leaf'] === 1 && $parsed['ciphertext'] === 'sealed-bytes',
+    'a well-formed envelope parses to its declared position and ciphertext'
+);
+
+$refusal = static function (array $changes) use ($goodEnvelope): string {
+    try {
+        ProtectedChat::parseEnvelope($changes + $goodEnvelope);
+    } catch (ProtectedChatMismatch $error) {
+        return $error->errorCode();
+    }
+    return 'accepted';
+};
+
+protectedAssert(
+    $refusal(['envelope_version' => ProtectedChat::ENVELOPE_VERSION + 1]) === 'unsupported_envelope_version',
+    'an envelope declaring an unknown version is refused by name'
+);
+protectedAssert(
+    $refusal(['envelope_version' => 0]) === 'unsupported_envelope_version',
+    'a missing version is refused rather than defaulted'
+);
+protectedAssert(
+    $refusal(['content_type' => 99]) === 'invalid_envelope',
+    'an unknown content type is refused'
+);
+protectedAssert(
+    $refusal(['epoch' => -1]) === 'invalid_envelope' &&
+        $refusal(['sender_leaf' => -1]) === 'invalid_envelope',
+    'a negative epoch or leaf is refused'
+);
+protectedAssert(
+    $refusal(['group_id' => base64_encode(str_repeat("\x22", 31))]) === 'invalid_envelope' &&
+        $refusal(['aad_digest' => 'not base64 at all!!']) === 'invalid_envelope',
+    'a group identifier of the wrong length and a non-base64 digest are both refused'
+);
+protectedAssert(
+    $refusal(['ciphertext' => base64_encode(str_repeat('x', ProtectedChat::MAX_CIPHERTEXT_BYTES + 1))]) === 'invalid_envelope',
+    'ciphertext beyond the cap is refused'
+);
+protectedAssert(
+    $refusal([]) === 'accepted',
+    'the fixture these cases mutate is itself accepted'
+);
+
+// The client must declare where a message really came from. An envelope with a
+// constant epoch would leave the server's rollback check inert, which is what
+// this pins against.
+$client = (string)file_get_contents($root . '/assets/js/protected-chat.js');
+protectedAssert(
+    str_contains($client, 'epoch: Number(session.epoch(groupId))') &&
+        str_contains($client, 'sender_leaf: session.own_leaf(groupId)'),
+    'the client reads its real epoch and leaf from the group rather than sending a constant'
+);
+protectedAssert(
+    !preg_match('/epoch:\s*0\b/', $client),
+    'no envelope or handshake is posted with a hardcoded epoch'
+);
+protectedAssert(
+    str_contains($client, "session.apply_handshake(payload) === 'applied'"),
+    'the client applies handshakes it fetches, so a membership change does not strand it'
+);
+
 // ---- the envelope fingerprint carries no plaintext -------------------------
 
 $aad = str_repeat("\x11", 32);

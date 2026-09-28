@@ -171,6 +171,31 @@ impl MlsSession {
         serde_wasm_like(&result)
     }
 
+    /// Whether a device is already a member of a group.
+    ///
+    /// The directory hands out a key package for every live device of an
+    /// account, including devices that are already in this conversation. Adding
+    /// one twice would give it two leaves, so the caller needs to be able to
+    /// ask.
+    pub fn has_member(&self, group_id: &[u8], signature_key: &[u8]) -> Result<bool, JsValue> {
+        Ok(self
+            .load_group(group_id)?
+            .members()
+            .any(|member| member.signature_key.as_slice() == signature_key))
+    }
+
+    /// The signature key inside a key package, so a caller can tell whose it is
+    /// before deciding to add it.
+    pub fn key_package_signature_key(key_package: &[u8]) -> Result<Vec<u8>, JsValue> {
+        let key_package_in = KeyPackageIn::tls_deserialize(&mut &key_package[..])
+            .map_err(|error| JsValue::from_str(&format!("reading the key package failed: {error:?}")))?;
+        let crypto = RustCrypto::default();
+        let validated = key_package_in
+            .validate(&crypto, ProtocolVersion::Mls10)
+            .map_err(|error| JsValue::from_str(&format!("the key package is not valid: {error:?}")))?;
+        Ok(validated.leaf_node().signature_key().as_slice().to_vec())
+    }
+
     /// Join a group from a welcome delivered by the server.
     pub fn join_group(&mut self, welcome: &[u8], ratchet_tree: &[u8]) -> Result<Vec<u8>, JsValue> {
         let message = MlsMessageIn::tls_deserialize(&mut &welcome[..])
@@ -235,6 +260,73 @@ impl MlsSession {
             }
             _ => Ok(Vec::new()),
         }
+    }
+
+    /// Apply a handshake message — in practice a commit — that another member
+    /// produced.
+    ///
+    /// Without this, a membership change silently desynchronises everyone who
+    /// was already in the group: the committer moves to a new epoch and nobody
+    /// else does, so the next message cannot be read by anyone. The group id
+    /// comes from the message itself, because a client fetching a queue of
+    /// handshakes does not necessarily know yet which conversation each one
+    /// belongs to.
+    ///
+    /// Returns what happened rather than throwing for the ordinary cases, so a
+    /// caller walking a queue can tell "not mine" from "broken":
+    ///
+    /// * `applied` — the group moved to the new epoch
+    /// * `already-applied` — behind our epoch; our own commit, or a re-fetch
+    /// * `unknown-group` — a conversation this device has not joined
+    /// * `proposal` / `not-a-handshake` — nothing to apply
+    pub fn apply_handshake(&mut self, handshake: &[u8]) -> Result<String, JsValue> {
+        let incoming = MlsMessageIn::tls_deserialize(&mut &handshake[..])
+            .map_err(|error| JsValue::from_str(&format!("reading the handshake failed: {error:?}")))?;
+        let protocol: ProtocolMessage = incoming
+            .try_into_protocol_message()
+            .map_err(|error| JsValue::from_str(&format!("not a protocol message: {error:?}")))?;
+
+        let group_id = protocol.group_id().clone();
+        let mut group = match MlsGroup::load(self.provider.storage(), &group_id)
+            .map_err(|error| JsValue::from_str(&format!("loading the group failed: {error:?}")))?
+        {
+            Some(group) => group,
+            None => return Ok("unknown-group".to_string()),
+        };
+
+        // Our own commit was merged when we made it, and a re-fetch can hand us
+        // the same commit twice. Both look the same from here: an epoch we have
+        // already left.
+        if protocol.epoch().as_u64() < group.epoch().as_u64() {
+            return Ok("already-applied".to_string());
+        }
+
+        let processed = group
+            .process_message(&self.provider, protocol)
+            .map_err(|error| JsValue::from_str(&format!("processing the handshake failed: {error:?}")))?;
+
+        match processed.into_content() {
+            ProcessedMessageContent::StagedCommitMessage(commit) => {
+                group
+                    .merge_staged_commit(&self.provider, *commit)
+                    .map_err(|error| JsValue::from_str(&format!("merging failed: {error:?}")))?;
+                Ok("applied".to_string())
+            }
+            ProcessedMessageContent::ProposalMessage(_) => Ok("proposal".to_string()),
+            ProcessedMessageContent::ApplicationMessage(_) => Ok("not-a-handshake".to_string()),
+            _ => Ok("ignored".to_string()),
+        }
+    }
+
+    /// The group's current epoch, which every sent envelope has to declare
+    /// honestly for the server's rollback check to mean anything.
+    pub fn epoch(&self, group_id: &[u8]) -> Result<u64, JsValue> {
+        Ok(self.load_group(group_id)?.epoch().as_u64())
+    }
+
+    /// This device's own leaf index in the group.
+    pub fn own_leaf(&self, group_id: &[u8]) -> Result<u32, JsValue> {
+        Ok(self.load_group(group_id)?.own_leaf_index().u32())
     }
 
     /// The ratchet tree for a group, which a joiner needs alongside a welcome.

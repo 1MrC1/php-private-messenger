@@ -233,18 +233,18 @@ final class ProtectedChat
     // ---- envelopes ---------------------------------------------------------
 
     /**
-     * Store one sealed message. `messages.content` is written as the empty
-     * string: it is already a legal value here, every existing reader tolerates
-     * it, and `content LIKE '%needle%'` cannot match it — so server-side search
-     * fails closed for protected chats with no extra code.
+     * Check the shape of an envelope, without touching the database.
+     *
+     * Deliberately separate from storing it: everything here is decidable from
+     * the envelope alone, so it can be tested directly, and a new caller cannot
+     * accidentally skip it. Nothing here inspects the ciphertext — the server
+     * cannot and must not be able to.
+     *
+     * @param array<string, mixed> $envelope
+     * @return array{version: int, content_type: int, epoch: int, sender_leaf: int, group_id: string, aad_digest: string, ciphertext: string}
      */
-    public function storeEnvelope(int $chatId, int $senderId, array $envelope): array
+    public static function parseEnvelope(array $envelope): array
     {
-        $this->assertProtectionMatches($chatId, true);
-        if (!$this->isParticipant($chatId, $senderId)) {
-            throw new ProtectedChatMismatch('You are not in this conversation', 'not_a_participant');
-        }
-
         $version = (int)($envelope['envelope_version'] ?? 0);
         if ($version !== self::ENVELOPE_VERSION) {
             throw new ProtectedChatMismatch('Unsupported envelope version', 'unsupported_envelope_version');
@@ -259,9 +259,43 @@ final class ProtectedChat
             throw new ProtectedChatMismatch('Invalid envelope position', 'invalid_envelope');
         }
 
-        $groupId = self::decodeExact((string)($envelope['group_id'] ?? ''), 32, 'group identifier');
-        $aadDigest = self::decodeExact((string)($envelope['aad_digest'] ?? ''), 32, 'authenticated data digest');
-        $ciphertext = self::decodeBounded((string)($envelope['ciphertext'] ?? ''), self::MAX_CIPHERTEXT_BYTES, 'ciphertext');
+        return [
+            'version' => $version,
+            'content_type' => $contentType,
+            'epoch' => $epoch,
+            'sender_leaf' => $senderLeaf,
+            'group_id' => self::decodeExact((string)($envelope['group_id'] ?? ''), 32, 'group identifier'),
+            'aad_digest' => self::decodeExact((string)($envelope['aad_digest'] ?? ''), 32, 'authenticated data digest'),
+            'ciphertext' => self::decodeBounded(
+                (string)($envelope['ciphertext'] ?? ''),
+                self::MAX_CIPHERTEXT_BYTES,
+                'ciphertext'
+            ),
+        ];
+    }
+
+    /**
+     * Store one sealed message. `messages.content` is written as the empty
+     * string: it is already a legal value here, every existing reader tolerates
+     * it, and `content LIKE '%needle%'` cannot match it — so server-side search
+     * fails closed for protected chats with no extra code.
+     */
+    public function storeEnvelope(int $chatId, int $senderId, array $envelope): array
+    {
+        $this->assertProtectionMatches($chatId, true);
+        if (!$this->isParticipant($chatId, $senderId)) {
+            throw new ProtectedChatMismatch('You are not in this conversation', 'not_a_participant');
+        }
+
+        [
+            'version' => $version,
+            'content_type' => $contentType,
+            'epoch' => $epoch,
+            'sender_leaf' => $senderLeaf,
+            'group_id' => $groupId,
+            'aad_digest' => $aadDigest,
+            'ciphertext' => $ciphertext,
+        ] = self::parseEnvelope($envelope);
 
         $group = $this->select('SELECT group_id, current_epoch FROM mls_groups WHERE chat_id = ?', 'i', [$chatId]);
         if ($group === [] || !hash_equals((string)$group[0]['group_id'], $groupId)) {

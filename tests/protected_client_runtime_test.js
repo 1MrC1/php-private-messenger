@@ -226,6 +226,49 @@ function fakeServer() {
     );
     console.log('PASS: exhausted key packages refuse the conversation instead of excluding a device');
 
+    // ---- a device enrolled after the conversation started ------------------
+    // Without this path a device enrolled later can never read the
+    // conversation, and — worse — the members already in it would be stranded
+    // in an old epoch by the commit that admits it.
+
+    const tabletStorage = memoryStorage();
+    const tablet = build(2, tabletStorage);
+    await tablet.enroll({
+        identity: 'mira-tablet@example', label: 'Tablet',
+        currentPassword: 'secret', secondFactorCode: '222222', keyPackageCount: 2,
+    });
+
+    const admission = await ada.admitDevices(42, started.groupId, 2);
+    assert.equal(admission.admitted, 1, 'only the new device is admitted');
+    assert.equal(admission.skipped, 1, 'the device already in the conversation is skipped, not added twice');
+    console.log('PASS: a device enrolled later is admitted without duplicating the one already there');
+
+    // The member that was already there has to apply the commit or it stops
+    // being able to read. This is the regression that motivated the path.
+    const miraCatchUp = await miraAgain.syncGroup(42, sync.lastSequence);
+    assert.ok(miraCatchUp.applied >= 1, 'the existing member applied the commit that admits the new device');
+
+    const tabletJoin = await tablet.syncGroup(42, 0);
+    assert.ok(tabletJoin.groupId, 'the new device joins from the welcome');
+
+    const afterAdmission = 'everyone including the tablet';
+    await ada.send(42, started.groupId, afterAdmission);
+
+    const miraReads = await miraAgain.receive(42, sync.groupId, 0);
+    assert.ok(miraReads.some((message) => message.text === afterAdmission),
+        'the member that was already there keeps reading across the membership change');
+    const tabletReads = await tablet.receive(42, tabletJoin.groupId, 0);
+    assert.ok(tabletReads.some((message) => message.text === afterAdmission),
+        'the newly admitted device reads what is sent afterwards');
+    console.log('PASS: after a membership change every device still reads');
+
+    // The safety number is supposed to move when the membership does, which is
+    // the whole point of comparing it.
+    const numberAfter = await ada.safetyNumber(started.groupId);
+    assert.equal(numberAfter, await tablet.safetyNumber(tabletJoin.groupId),
+        'every device computes the same safety number');
+    console.log('PASS: the safety number agrees across all three devices');
+
     // ---- encrypted attachments --------------------------------------------
 
     const fileBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -280,11 +323,18 @@ function fakeServer() {
     assert.equal(await recovered.resume(), false, 'the replacement device starts empty');
     await recovered.restoreFromRecoveryFile(recovery.file, recovery.passphrase);
 
+    // This file was written before the tablet was admitted, so it restores a
+    // device one epoch behind. It has to catch up on handshakes before it can
+    // read again — which is the behaviour to want, not a bug: the alternative
+    // would be a device that silently shows a conversation it has fallen out of.
+    const caughtUp = await recovered.syncGroup(42, 0);
+    assert.ok(caughtUp.applied >= 1, 'a recovered device applies the changes it missed');
+
     await ada.send(42, started.groupId, 'recovered and still reading');
     const afterRecovery = await recovered.receive(42, sync.groupId, 0);
     assert.ok(afterRecovery.some((message) => message.text === 'recovered and still reading'),
         'a recovered device reads messages sent after the loss');
-    console.log('PASS: a replacement device recovers and keeps reading');
+    console.log('PASS: a replacement device recovers, catches up and keeps reading');
 
     await assert.rejects(
         () => build(2, memoryStorage()).restoreFromRecoveryFile(recovery.file, 'wrong-passphrase-entirely'),

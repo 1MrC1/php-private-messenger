@@ -188,26 +188,78 @@
                 throw new Error((protect && protect.message) || 'Could not protect the conversation');
             }
 
-            for (const entry of claim.key_packages) {
-                const added = session.add_member(groupId, fromBase64(entry.key_package));
+            await admit(chatId, groupId, claim.key_packages);
+            await saveSession();
+            return { groupId: toBase64(groupId) };
+        }
+
+        /**
+         * Admit another account's devices to a conversation that is already
+         * protected — a device enrolled after the conversation started, which
+         * would otherwise never be able to read it.
+         *
+         * Existing members pick the commit up through `syncGroup`; without that
+         * they would stay in the old epoch and stop being able to read.
+         */
+        async function admitDevices(chatId, groupIdBase64, otherUserId) {
+            await requireSession();
+
+            const claim = await post('api/chat.php', {
+                action: 'claim_key_packages',
+                user_id: otherUserId,
+            });
+            if (!claim || claim.success !== true) {
+                throw new Error((claim && claim.message) || 'Could not claim key packages');
+            }
+            const exhausted = claim.key_packages.filter((entry) => entry.exhausted);
+            if (exhausted.length > 0) {
+                throw new Error('A device of that account has no key packages left; it could not be added');
+            }
+
+            const result = await admit(chatId, fromBase64(groupIdBase64), claim.key_packages);
+            await saveSession();
+            return result;
+        }
+
+        /**
+         * Add each claimed key package and publish what the others need.
+         *
+         * A device already in the group is skipped rather than added again: the
+         * directory hands out a package for every live device of an account,
+         * including ones already here, and adding one twice would give it two
+         * leaves.
+         */
+        async function admit(chatId, groupId, keyPackages) {
+            let admitted = 0;
+            let skipped = 0;
+            for (const entry of keyPackages) {
+                const material = fromBase64(entry.key_package);
+                const key = mls.MlsSession.key_package_signature_key(material);
+                if (session.has_member(groupId, key)) {
+                    skipped++;
+                    continue;
+                }
+                const added = session.add_member(groupId, material);
+                // The epoch the group is in once this commit has been applied,
+                // not a placeholder: the server orders handshakes by it.
+                const epoch = Number(session.epoch(groupId));
                 await post('api/chat.php', {
                     action: 'post_handshake',
                     chat_id: chatId,
                     kind: 2,
-                    epoch: 0,
+                    epoch,
                     payload: toBase64(added.commit),
                 });
                 await post('api/chat.php', {
                     action: 'post_handshake',
                     chat_id: chatId,
                     kind: 3,
-                    epoch: 0,
+                    epoch,
                     payload: toBase64(concat(lengthPrefixed(added.welcome), added.ratchet_tree)),
                 });
+                admitted++;
             }
-
-            await saveSession();
-            return { groupId: toBase64(groupId) };
+            return { admitted, skipped };
         }
 
         /** Apply any group changes the server is holding for this conversation. */
@@ -223,6 +275,7 @@
             }
 
             let joinedGroupId = null;
+            let applied = 0;
             let lastSequence = afterSequence || 0;
             for (const entry of response.handshakes) {
                 lastSequence = entry.sequence;
@@ -236,13 +289,40 @@
                         // A welcome addressed to another device is not an error
                         // for this one; it simply cannot open it.
                     }
+                    continue;
+                }
+
+                // Commits and proposals. Applying these is not optional: when
+                // somebody else changes the membership they move to a new
+                // epoch, and a device that skips the commit stays behind and
+                // can no longer read anything. The queue is in order, so a
+                // commit that arrives before our own welcome is simply for a
+                // group we are not in yet.
+                if (session.apply_handshake(payload) === 'applied') {
+                    applied++;
                 }
             }
 
             await saveSession();
             return {
                 lastSequence,
+                applied,
                 groupId: joinedGroupId ? toBase64(joinedGroupId) : null,
+            };
+        }
+
+        /**
+         * Where in the group a message was produced.
+         *
+         * The server keeps this to order handshakes and to refuse an epoch that
+         * has gone backwards, so sending a constant would quietly turn that
+         * check off. `epoch()` crosses from WebAssembly as a BigInt, which
+         * JSON.stringify refuses outright, hence the conversion.
+         */
+        function position(groupId) {
+            return {
+                epoch: Number(session.epoch(groupId)),
+                sender_leaf: session.own_leaf(groupId),
             };
         }
 
@@ -250,6 +330,7 @@
             await requireSession();
             const groupId = fromBase64(groupIdBase64);
             const sealed = session.seal(groupId, encoder.encode(text));
+            const where = position(groupId);
             await saveSession();
 
             const response = await post('api/chat.php', {
@@ -258,8 +339,8 @@
                 envelope: {
                     envelope_version: 1,
                     content_type: 1,
-                    epoch: 0,
-                    sender_leaf: 0,
+                    epoch: where.epoch,
+                    sender_leaf: where.sender_leaf,
                     group_id: groupIdBase64,
                     aad_digest: toBase64(new Uint8Array(32)),
                     ciphertext: toBase64(sealed),
@@ -368,6 +449,7 @@
 
             const groupId = fromBase64(groupIdBase64);
             const sealed = session.seal(groupId, encoder.encode(JSON.stringify(descriptor)));
+            const where = position(groupId);
             await saveSession();
 
             const response = await post('api/chat.php', {
@@ -376,8 +458,8 @@
                 envelope: {
                     envelope_version: 1,
                     content_type: 2,
-                    epoch: 0,
-                    sender_leaf: 0,
+                    epoch: where.epoch,
+                    sender_leaf: where.sender_leaf,
                     group_id: groupIdBase64,
                     aad_digest: toBase64(new Uint8Array(32)),
                     ciphertext: toBase64(sealed),
@@ -538,7 +620,34 @@
             }
         }
 
-        return { resume, enroll, startConversation, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile };
+        /**
+         * Remove a device from a protected conversation and publish the commit
+         * the remaining members need.
+         *
+         * The removed device can still read what it already received — that is
+         * inherent, it holds those keys — but not what is sent afterwards.
+         */
+        async function removeMember(chatId, groupIdBase64, signatureKeyBase64) {
+            await requireSession();
+            const groupId = fromBase64(groupIdBase64);
+            const commit = session.remove_member(groupId, fromBase64(signatureKeyBase64));
+            const where = position(groupId);
+            await saveSession();
+
+            const response = await post('api/chat.php', {
+                action: 'post_handshake',
+                chat_id: chatId,
+                kind: 2,
+                epoch: where.epoch,
+                payload: toBase64(commit),
+            });
+            if (!response || response.success !== true) {
+                throw new Error((response && response.message) || 'Could not publish the removal');
+            }
+            return { epoch: where.epoch };
+        }
+
+        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember };
     }
 
     // ---- small helpers -----------------------------------------------------

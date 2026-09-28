@@ -132,6 +132,56 @@ function seededRandom(seed) {
     }
     console.log('PASS: empty and oversized inputs are refused');
 
+    // ---- handshakes ---------------------------------------------------------
+    // A commit is more dangerous than a message: applying a bad one moves the
+    // group somewhere it should not be. The property is that no mutation of a
+    // commit is ever *applied*, and that the group's epoch does not move.
+
+    const carol = new mls.MlsSession();
+    carol.create_identity('carol@example');
+    const commit = alice.add_member(groupId, carol.create_key_package()).commit;
+
+    const epochBefore = Number(bob.epoch(bobGroupId));
+    let handshakesRefused = 0;
+    let handshakesReported = 0;
+
+    for (let attempt = 0; attempt < 200; attempt++) {
+        const mutated = Uint8Array.from(commit);
+        const flips = 1 + Math.floor(random() * 3);
+        for (let index = 0; index < flips; index++) {
+            const at = Math.floor(random() * mutated.length);
+            mutated[at] = mutated[at] ^ (1 << Math.floor(random() * 8));
+        }
+        if (Buffer.from(mutated).equals(Buffer.from(commit))) {
+            continue;
+        }
+
+        let outcome;
+        try {
+            outcome = bob.apply_handshake(mutated);
+        } catch (error) {
+            handshakesRefused++;
+            continue;
+        }
+        assert.notEqual(outcome, 'applied',
+            'a mutated commit must never be applied (attempt ' + attempt + ')');
+        handshakesReported++;
+    }
+
+    console.log('PASS: 200 mutated commits, ' + handshakesRefused + ' refused, ' +
+        handshakesReported + ' reported without being applied');
+    assert.equal(Number(bob.epoch(bobGroupId)), epochBefore,
+        'no mutated commit moved the group to another epoch');
+    console.log('PASS: the group stayed in its epoch throughout');
+
+    // The genuine commit still applies afterwards, so the fuzzing did not leave
+    // the session in a state where honest traffic fails.
+    assert.equal(bob.apply_handshake(commit), 'applied',
+        'the genuine commit still applies after the mutated ones were refused');
+    assert.equal(Number(bob.epoch(bobGroupId)), epochBefore + 1,
+        'applying the genuine commit does move the epoch');
+    console.log('PASS: the genuine commit still applies afterwards');
+
     console.log('MLS fuzz runtime tests passed.');
 })().catch((error) => {
     console.error(error);

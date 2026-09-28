@@ -40,6 +40,47 @@ export class MlsSession {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Apply a handshake message — in practice a commit — that another member
+     * produced.
+     *
+     * Without this, a membership change silently desynchronises everyone who
+     * was already in the group: the committer moves to a new epoch and nobody
+     * else does, so the next message cannot be read by anyone. The group id
+     * comes from the message itself, because a client fetching a queue of
+     * handshakes does not necessarily know yet which conversation each one
+     * belongs to.
+     *
+     * Returns what happened rather than throwing for the ordinary cases, so a
+     * caller walking a queue can tell "not mine" from "broken":
+     *
+     * * `applied` — the group moved to the new epoch
+     * * `already-applied` — behind our epoch; our own commit, or a re-fetch
+     * * `unknown-group` — a conversation this device has not joined
+     * * `proposal` / `not-a-handshake` — nothing to apply
+     * @param {Uint8Array} handshake
+     * @returns {string}
+     */
+    apply_handshake(handshake) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passArray8ToWasm0(handshake, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.mlssession_apply_handshake(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * Start a new group. Returns its identifier.
      * @returns {Uint8Array}
      */
@@ -83,6 +124,21 @@ export class MlsSession {
         return v1;
     }
     /**
+     * The group's current epoch, which every sent envelope has to declare
+     * honestly for the server's rollback check to mean anything.
+     * @param {Uint8Array} group_id
+     * @returns {bigint}
+     */
+    epoch(group_id) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_epoch(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return BigInt.asUintN(64, ret[0]);
+    }
+    /**
      * The whole session as bytes. Contains private keys: wrap before storing.
      * @returns {Uint8Array}
      */
@@ -94,6 +150,28 @@ export class MlsSession {
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
+    }
+    /**
+     * Whether a device is already a member of a group.
+     *
+     * The directory hands out a key package for every live device of an
+     * account, including devices that are already in this conversation. Adding
+     * one twice would give it two leaves, so the caller needs to be able to
+     * ask.
+     * @param {Uint8Array} group_id
+     * @param {Uint8Array} signature_key
+     * @returns {boolean}
+     */
+    has_member(group_id, signature_key) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(signature_key, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_has_member(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
     }
     /**
      * This device's own signature key, so a caller can name it for removal.
@@ -125,6 +203,23 @@ export class MlsSession {
         return v3;
     }
     /**
+     * The signature key inside a key package, so a caller can tell whose it is
+     * before deciding to add it.
+     * @param {Uint8Array} key_package
+     * @returns {Uint8Array}
+     */
+    static key_package_signature_key(key_package) {
+        const ptr0 = passArray8ToWasm0(key_package, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_key_package_signature_key(ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
      * A session with no identity yet. Call `create_identity` next.
      */
     constructor() {
@@ -152,6 +247,20 @@ export class MlsSession {
         var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v3;
+    }
+    /**
+     * This device's own leaf index in the group.
+     * @param {Uint8Array} group_id
+     * @returns {number}
+     */
+    own_leaf(group_id) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_own_leaf(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
     }
     /**
      * The ratchet tree for a group, which a joiner needs alongside a welcome.
