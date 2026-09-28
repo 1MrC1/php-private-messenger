@@ -215,4 +215,57 @@ deviceAssert(
     'revocation is held to the same bar as enrollment'
 );
 
+// ---- revocation has to reach the conversation, not just the directory ------
+// Revoking a device stops it being offered key packages. A device already inside
+// an MLS group keeps the keys it holds, and no server action can take them back,
+// so a client has to publish a removal. These pin the parts that make that
+// possible, since none of it can be exercised without a database.
+
+$directorySource = (string)file_get_contents($root . '/classes/DeviceDirectory.php');
+deviceAssert(
+    str_contains($directorySource, 'public function participantDevices('),
+    'the directory can list the devices of a conversation\'s participants'
+);
+deviceAssert(
+    preg_match(
+        '/function participantDevices\([^)]*\)[^{]*\{\s*if \(!\$chats->isParticipant/',
+        $directorySource
+    ) === 1,
+    'that listing refuses anyone who is not in the conversation, before any other work'
+);
+deviceAssert(
+    !preg_match('/participantDevices.*?label/s', substr(
+        $directorySource,
+        (int)strpos($directorySource, 'function participantDevices'),
+        1400
+    )),
+    'it returns no device labels: a signature key is already public to the group, a name is not'
+);
+deviceAssert(
+    str_contains($directorySource, "'signature_public_key' => base64_encode("),
+    'signature keys leave as base64, like every other key in this API'
+);
+
+$api = (string)file_get_contents($root . '/api/chat.php');
+deviceAssert(
+    substr_count($api, "case 'list_participant_devices':") === 2,
+    'the action is both rate-limited with the directory group and dispatched'
+);
+
+$client = (string)file_get_contents($root . '/assets/js/protected-chat.js');
+deviceAssert(
+    str_contains($client, 'async function enforceRevocations(') &&
+        str_contains($client, 'session.has_member(groupId, fromBase64(device.signature_public_key))'),
+    'the client removes revoked devices that are still members'
+);
+deviceAssert(
+    str_contains($client, "device.signature_public_key === mine"),
+    'it never tries to remove itself, which would strand this device'
+);
+$ui = (string)file_get_contents($root . '/assets/js/protected-ui.js');
+deviceAssert(
+    str_contains($ui, 'enforceRevocations') && str_contains($ui, 'protected.revocation_check_failed'),
+    'the interface runs that check when a conversation is opened and says so if it fails'
+);
+
 echo "Device directory tests passed.\n";

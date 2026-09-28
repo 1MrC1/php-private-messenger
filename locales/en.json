@@ -871,6 +871,7 @@
     "protected.enroll_code": "Verification or backup code",
     "protected.enroll_submit": "Set up device",
     "protected.no_scanning": "Files in protected conversations are not scanned for malware. Only open what you expect from someone you trust.",
-    "protected.safety_label": "Safety number"
+    "protected.safety_label": "Safety number",
+    "protected.revocation_check_failed": "Could not check whether a revoked device is still in this conversation."
   }
 }

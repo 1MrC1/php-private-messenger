@@ -168,7 +168,28 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    dependent crate cannot reach, so they do not run. What runs covers the
    primitives, the label encodings and the epoch key schedule.
 
-12. **Interoperability across engines**: `crypto/interop/run.mjs` puts one
+12. **Revocation that actually reaches the conversation**: revoking a device in
+   settings stops it being offered new key packages. On its own that does
+   nothing to a device already inside a group — it holds those keys, and no
+   server action can take them back, because the server has none. So a client
+   still in the conversation publishes the removal:
+   `list_participant_devices` returns each participant device's signature key
+   and revoked flag (no labels — a key is already public to the group through
+   the ratchet tree, a device's name is not, and only a participant may ask),
+   and `enforceRevocations()` removes any revoked device that is still a member.
+   The interface runs it when a conversation is opened and says so if it fails,
+   because a security control that fails quietly is worse than one that is
+   absent.
+
+   Proven end to end in `tests/protected_client_runtime_test.js`: a device reads,
+   is revoked, is removed, and then cannot read what follows while the remaining
+   devices can. Running the check again removes nothing.
+
+   The limit: only a current member can publish a removal, so a conversation
+   where every remaining device is offline stays unenforced until one of them
+   opens it.
+
+13. **Interoperability across engines**: `crypto/interop/run.mjs` puts one
    device in each of Chromium, Firefox and WebKit and has them hold a real
    conversation in every ordered pair — identity, welcome, a message sealed in
    one engine and opened in another, a reply back, the safety number agreeing

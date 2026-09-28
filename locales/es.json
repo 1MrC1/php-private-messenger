@@ -871,6 +871,7 @@
     "protected.enroll_code": "Código de verificación o de respaldo",
     "protected.enroll_submit": "Configurar dispositivo",
     "protected.no_scanning": "Los archivos en conversaciones protegidas no se analizan en busca de malware. Abre solo lo que esperas de alguien en quien confías.",
-    "protected.safety_label": "Número de seguridad"
+    "protected.safety_label": "Número de seguridad",
+    "protected.revocation_check_failed": "No se pudo comprobar si un dispositivo revocado sigue en esta conversación."
   }
 }

@@ -47,7 +47,13 @@ function fakeServer() {
             case 'enroll_device': {
                 const userId = body.__userId;
                 const list = devices.get(userId) || [];
-                const device = { deviceId: nextDeviceId++, keyPackages: body.key_packages.slice() };
+                const device = {
+                    deviceId: nextDeviceId++,
+                    keyPackages: body.key_packages.slice(),
+                    signatureKey: body.signature_public_key,
+                    revoked: false,
+                    userId,
+                };
                 list.push(device);
                 devices.set(userId, list);
                 return { success: true, device_id: device.deviceId, key_packages_stored: device.keyPackages.length };
@@ -63,6 +69,22 @@ function fakeServer() {
                             : { device_id: device.deviceId, key_package: null, exhausted: true };
                     }),
                 };
+            }
+            case 'list_participant_devices': {
+                // Every device of every participant, the way the real endpoint
+                // answers: signature keys and a revoked flag, no labels.
+                const all = [];
+                for (const list of devices.values()) {
+                    for (const device of list) {
+                        all.push({
+                            device_id: device.deviceId,
+                            user_id: device.userId,
+                            signature_public_key: device.signatureKey,
+                            revoked: device.revoked,
+                        });
+                    }
+                }
+                return { success: true, devices: all };
             }
             case 'protect_chat':
                 protectedChats.add(body.chat_id);
@@ -268,6 +290,46 @@ function fakeServer() {
     assert.equal(numberAfter, await tablet.safetyNumber(tabletJoin.groupId),
         'every device computes the same safety number');
     console.log('PASS: the safety number agrees across all three devices');
+
+    // ---- revocation actually stops a device reading ------------------------
+    // Revoking a device stops it being offered new key packages. That alone does
+    // nothing to a device already inside the group: it holds those keys, and the
+    // server cannot take them back because it has none. Somebody still in the
+    // conversation has to publish a removal.
+
+    const miraDevices = server.devices.get(2);
+    const tabletDevice = miraDevices[miraDevices.length - 1];
+    assert.ok(tabletDevice && tabletDevice.deviceId > 0, 'the tablet is in the directory');
+
+    const beforeRevocation = 'still readable by the tablet';
+    await ada.send(42, started.groupId, beforeRevocation);
+    const tabletBefore = await tablet.receive(42, tabletJoin.groupId, 0);
+    assert.ok(tabletBefore.some((message) => message.text === beforeRevocation),
+        'the tablet reads normally before being revoked');
+
+    tabletDevice.revoked = true;
+
+    // Revocation alone leaves it reading — which is exactly the gap this closes.
+    const enforced = await ada.enforceRevocations(42, started.groupId);
+    assert.deepEqual(enforced.removed, [tabletDevice.deviceId],
+        'the revoked device is removed from the conversation');
+
+    await miraAgain.syncGroup(42, 0);
+    const afterRevocation = 'not for a revoked device';
+    await ada.send(42, started.groupId, afterRevocation);
+
+    const tabletAfter = await tablet.receive(42, tabletJoin.groupId, 0);
+    assert.ok(!tabletAfter.some((message) => message.text === afterRevocation),
+        'the revoked device cannot read what is sent after its removal');
+    const miraAfter = await miraAgain.receive(42, sync.groupId, 0);
+    assert.ok(miraAfter.some((message) => message.text === afterRevocation),
+        'the devices that remain keep reading');
+    console.log('PASS: revoking a device removes it from the conversation and it stops reading');
+
+    // Running it again must be a no-op rather than a second removal.
+    assert.deepEqual((await ada.enforceRevocations(42, started.groupId)).removed, [],
+        'a device already removed is not removed again');
+    console.log('PASS: enforcing revocations twice changes nothing the second time');
 
     // ---- encrypted attachments --------------------------------------------
 

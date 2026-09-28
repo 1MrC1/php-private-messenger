@@ -621,6 +621,43 @@
         }
 
         /**
+         * Remove any member of this conversation that belongs to a revoked
+         * device, and publish the removals.
+         *
+         * Revoking a device in settings stops it being offered new key packages.
+         * It does **not** stop a device that is already inside a group from
+         * reading: it holds those keys, and no server action can take them back,
+         * because the server has none. Somebody still in the conversation has to
+         * publish a removal, which is what this does — best effort, since only a
+         * current member can do it.
+         */
+        async function enforceRevocations(chatId, groupIdBase64) {
+            await requireSession();
+            const response = await post('api/chat.php', {
+                action: 'list_participant_devices',
+                chat_id: chatId,
+            });
+            if (!response || response.success !== true) {
+                throw new Error((response && response.message) || 'Could not check device revocations');
+            }
+
+            const groupId = fromBase64(groupIdBase64);
+            const mine = toBase64(session.identity_key());
+            const removed = [];
+            for (const device of response.devices) {
+                if (!device.revoked || device.signature_public_key === mine) {
+                    continue;
+                }
+                if (!session.has_member(groupId, fromBase64(device.signature_public_key))) {
+                    continue;
+                }
+                await removeMember(chatId, groupIdBase64, device.signature_public_key);
+                removed.push(device.device_id);
+            }
+            return { removed };
+        }
+
+        /**
          * Remove a device from a protected conversation and publish the commit
          * the remaining members need.
          *
@@ -647,7 +684,7 @@
             return { epoch: where.epoch };
         }
 
-        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember };
+        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations };
     }
 
     // ---- small helpers -----------------------------------------------------

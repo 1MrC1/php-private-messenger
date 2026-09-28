@@ -168,6 +168,47 @@ final class DeviceDirectory
         ], $rows);
     }
 
+    /**
+     * Every device of every participant in one conversation, with its signature
+     * key and whether it is revoked.
+     *
+     * Why this exists: revoking a device stops it being offered new key
+     * packages, but a device already inside an MLS group keeps the keys it
+     * holds. Nothing the server can do changes that — it has no keys — so a
+     * client has to notice and publish a removal. To notice, it needs to know
+     * which member keys belong to revoked devices, which is what this returns.
+     *
+     * Only a participant may ask, and the answer deliberately carries no labels
+     * or timestamps: a signature key is already public to the group through the
+     * ratchet tree, but a device's name is nobody else's business.
+     *
+     * @return list<array{device_id: int, user_id: int, signature_public_key: string, revoked: bool}>
+     */
+    public function participantDevices(int $chatId, int $viewerId, ProtectedChat $chats): array
+    {
+        if (!$chats->isParticipant($chatId, $viewerId)) {
+            throw new ProtectedChatMismatch('You are not in this conversation', 'not_a_participant');
+        }
+
+        $rows = $this->select(
+            'SELECT d.id, d.user_id, d.signature_public_key, d.revoked_at
+             FROM e2ee_devices d
+             JOIN chat_participants p ON p.user_id = d.user_id
+             WHERE p.chat_id = ? AND p.left_at IS NULL
+             ORDER BY d.user_id, d.id',
+            'i',
+            [$chatId]
+        );
+
+        return array_map(static fn(array $row): array => [
+            'device_id' => (int)$row['id'],
+            'user_id' => (int)$row['user_id'],
+            // Stored as bytes, returned as base64 like every other key here.
+            'signature_public_key' => base64_encode((string)$row['signature_public_key']),
+            'revoked' => $row['revoked_at'] !== null,
+        ], $rows);
+    }
+
     // ---- key packages ------------------------------------------------------
 
     /** @param list<string> $keyPackagesBase64 */

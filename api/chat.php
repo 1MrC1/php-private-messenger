@@ -641,6 +641,7 @@ try {
 
         case 'list_devices':
         case 'claim_key_packages':
+        case 'list_participant_devices':
         case 'get_directory_log':
             // Device identity and key transport. Everything exchanged here is
             // public by design in MLS; no private key reaches the server.
@@ -673,6 +674,21 @@ try {
                             'key_packages' => $directory->claimKeyPackages(
                                 (int)$currentUser['id'],
                                 $targetUserId
+                            ),
+                        ];
+                        break;
+
+                    case 'list_participant_devices':
+                        // So a client can notice that a member of the group
+                        // belongs to a revoked device and publish a removal.
+                        // The server cannot do that itself: it holds no keys.
+                        $deviceChatId = requirePositiveApiId($input['chat_id'] ?? null, 'Chat ID');
+                        $response = [
+                            'success' => true,
+                            'devices' => $directory->participantDevices(
+                                $deviceChatId,
+                                (int)$currentUser['id'],
+                                new ProtectedChat()
                             ),
                         ];
                         break;

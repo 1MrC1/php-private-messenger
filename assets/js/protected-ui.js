@@ -108,6 +108,22 @@
             record.groupId = sync.groupId || record.groupId;
             record.lastSequence = sync.lastSequence;
             conversations.set(chatId, record);
+
+            // A device revoked in settings keeps the keys it already holds, so
+            // somebody still in the conversation has to publish a removal. Done
+            // here rather than silently skipped, and reported if it fails: a
+            // security control that fails quietly is worse than one that is
+            // absent, because nobody looks for it.
+            if (record.groupId && !record.revocationsChecked) {
+                record.revocationsChecked = true;
+                try {
+                    await active.enforceRevocations(chatId, record.groupId);
+                } catch (error) {
+                    record.revocationsChecked = false;
+                    notify(translate('protected.revocation_check_failed',
+                        'Could not check whether a revoked device is still in this conversation.'));
+                }
+            }
             return record.groupId;
         }
 
