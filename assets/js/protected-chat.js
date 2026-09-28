@@ -22,6 +22,9 @@
     const STORE = 'device';
     const WRAP_KEY_ID = 'wrapping-key';
     const STATE_ID = 'session-state';
+    // PBKDF2 is what a browser offers without more WebAssembly; the generated
+    // passphrase is what actually carries the strength here.
+    const RECOVERY_ITERATIONS = 600000;
 
     /**
      * Everything the client touches is injected, so the whole flow can be
@@ -423,13 +426,119 @@
             return { name: descriptor.name, bytes: new Uint8Array(plain) };
         }
 
+        // ---- recovery --------------------------------------------------------
+
+        /**
+         * Produce a recovery file for this device's state.
+         *
+         * The passphrase is generated for the person rather than chosen by
+         * them, because the key derivation available in a browser without
+         * WebAssembly is PBKDF2, which is materially weaker against a GPU than
+         * Argon2id. A ~128-bit generated passphrase does not depend on the
+         * derivation being strong.
+         *
+         * Download-only by design: the server never receives this. Handing it
+         * an encrypted blob would make the passphrase the only barrier for
+         * whoever holds the database.
+         */
+        async function createRecoveryFile() {
+            await requireSession();
+
+            // 24 characters from an unambiguous alphabet, ~124 bits.
+            const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+            const picks = randomBytes(24);
+            let passphrase = '';
+            for (let index = 0; index < picks.length; index++) {
+                passphrase += alphabet[picks[index] % alphabet.length];
+                if (index % 6 === 5 && index !== picks.length - 1) {
+                    passphrase += '-';
+                }
+            }
+
+            const salt = randomBytes(16);
+            const iv = randomBytes(12);
+            const key = await deriveRecoveryKey(passphrase, salt);
+            const sealed = new Uint8Array(
+                await subtle.encrypt({ name: 'AES-GCM', iv }, key, session.export_state())
+            );
+
+            return {
+                passphrase,
+                file: {
+                    format: 'pm-recovery-v1',
+                    kdf: 'PBKDF2-SHA512',
+                    iterations: RECOVERY_ITERATIONS,
+                    salt: toBase64(salt),
+                    iv: toBase64(iv),
+                    identity: toBase64(identity),
+                    signature_public_key: toBase64(signaturePublicKey),
+                    state: toBase64(sealed),
+                },
+            };
+        }
+
+        /** Restore a device from a recovery file and its passphrase. */
+        async function restoreFromRecoveryFile(file, passphrase) {
+            if (!file || file.format !== 'pm-recovery-v1') {
+                throw new Error('That is not a recovery file this version understands');
+            }
+            const key = await deriveRecoveryKey(passphrase, fromBase64(file.salt), file.iterations);
+            let plain;
+            try {
+                plain = await subtle.decrypt(
+                    { name: 'AES-GCM', iv: fromBase64(file.iv) },
+                    key,
+                    fromBase64(file.state)
+                );
+            } catch (error) {
+                throw new Error('That passphrase does not open this recovery file');
+            }
+
+            identity = fromBase64(file.identity);
+            signaturePublicKey = fromBase64(file.signature_public_key);
+            session = mls.MlsSession.restore(new Uint8Array(plain), signaturePublicKey, identity);
+            await saveSession();
+            return true;
+        }
+
+        async function deriveRecoveryKey(passphrase, salt, iterations) {
+            const material = await subtle.importKey(
+                'raw',
+                encoder.encode(passphrase),
+                { name: 'PBKDF2' },
+                false,
+                ['deriveKey']
+            );
+            return subtle.deriveKey(
+                {
+                    name: 'PBKDF2',
+                    salt,
+                    iterations: iterations || RECOVERY_ITERATIONS,
+                    hash: 'SHA-512',
+                },
+                material,
+                { name: 'AES-GCM', length: 256 },
+                false,
+                ['encrypt', 'decrypt']
+            );
+        }
+
+        /**
+         * The number two people can compare out of band to check nobody has
+         * been substituted. Only meaningful if someone actually compares it.
+         */
+        async function safetyNumber(groupIdBase64) {
+            await requireSession();
+            return session.safety_number(fromBase64(groupIdBase64));
+        }
+
         async function requireSession() {
             if (!(await resume())) {
                 throw new Error('This device is not enrolled for protected conversations');
             }
         }
 
-        return { resume, enroll, startConversation, syncGroup, send, receive, sendAttachment, openAttachment };
+        return { resume, enroll, startConversation, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile };
     }
 
     // ---- small helpers -----------------------------------------------------

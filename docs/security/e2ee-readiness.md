@@ -121,9 +121,26 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    check against corruption, not against the server itself, which could report a
    digest matching whatever it served.
 
-   What remains is the one thing that cannot be written: the independent review
-   of this integration (#7). Until it happens the wording stays as it is —
-   "experimental", "unaudited", and never "end-to-end encrypted".
+9. **Verification, recovery and removal**: a safety number both sides can
+   compare out of band, derived from the group's exporter secret so it changes
+   if the membership does; a passphrase-protected recovery file, where the
+   passphrase is *generated* (~124 bits) rather than chosen, because the only
+   key derivation a browser offers without more WebAssembly is PBKDF2 and a
+   generated passphrase does not depend on the derivation being strong; and
+   member removal, so a lost device stops being able to read.
+
+   Three properties are now proven by tests rather than asserted in prose:
+   `tests/mls_fuzz_runtime_test.js` puts 400 deterministic mutations of a sealed
+   message through `open()` and requires every one to be refused or to yield
+   something other than the plaintext, requires a replayed message to be
+   refused, and requires the session to still work afterwards;
+   `tests/mls_session_runtime_test.js` requires that a removed device cannot
+   read what is sent after its removal.
+
+   What remains is the one thing that cannot be written here: the independent
+   review of this integration (#7), the RFC 9420 official test vectors, and a
+   browser interoperability matrix. Until those land the wording stays as it is
+   — "experimental", "unaudited", and never "end-to-end encrypted".
 
 ## Prerequisite: nothing else may serve script into this origin
 

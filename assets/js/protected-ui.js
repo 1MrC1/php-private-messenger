@@ -126,6 +126,24 @@
             return (await ensureClient()).send(chatId, groupId, text);
         }
 
+        /** Show the safety number for the open conversation. */
+        async function showSafetyNumber(chatId) {
+            const holder = doc.getElementById ? doc.getElementById('protectedSafety') : null;
+            const target = doc.getElementById ? doc.getElementById('protectedSafetyNumber') : null;
+            if (!holder || !target) {
+                return null;
+            }
+            const groupId = await adoptConversation(chatId);
+            if (!groupId) {
+                holder.hidden = true;
+                return null;
+            }
+            const number = await (await ensureClient()).safetyNumber(groupId);
+            target.textContent = number;
+            holder.hidden = false;
+            return number;
+        }
+
         /**
          * Fill in the text of messages the renderer drew as empty.
          *
@@ -173,6 +191,7 @@
             adoptConversation,
             isProtected,
             send,
+            showSafetyNumber,
             decorateMessages,
             conversations,
         };
@@ -303,6 +322,7 @@
                 const chatId = window.currentChatId;
                 if (chatId && ui.isProtected(chatId)) {
                     ui.decorateMessages(chatId).catch(() => {});
+                    ui.showSafetyNumber(chatId).catch(() => {});
                 }
                 return result;
             };

@@ -870,6 +870,7 @@
     "protected.enroll_label": "Nombre de este dispositivo",
     "protected.enroll_code": "Código de verificación o de respaldo",
     "protected.enroll_submit": "Configurar dispositivo",
-    "protected.no_scanning": "Los archivos en conversaciones protegidas no se analizan en busca de malware. Abre solo lo que esperas de alguien en quien confías."
+    "protected.no_scanning": "Los archivos en conversaciones protegidas no se analizan en busca de malware. Abre solo lo que esperas de alguien en quien confías.",
+    "protected.safety_label": "Número de seguridad"
   }
 }

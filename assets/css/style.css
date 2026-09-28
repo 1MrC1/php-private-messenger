@@ -7616,3 +7616,22 @@ html[dir="rtl"] .settings-overview-card:hover > .fa-arrow-right {
     font-size: 0.78rem;
     line-height: 1.45;
 }
+
+/* The safety number people compare out of band. Monospaced and grouped so it
+   can be read aloud without losing one's place. */
+.protected-safety {
+    display: block;
+    margin-top: 6px;
+    color: var(--text-muted);
+}
+
+.protected-safety code {
+    display: inline-block;
+    margin-inline-start: 6px;
+    color: var(--text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    white-space: pre-line;
+    vertical-align: top;
+}

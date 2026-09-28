@@ -261,6 +261,43 @@ function fakeServer() {
         'a swapped blob fails to decrypt rather than yielding plausible bytes');
     console.log('PASS: a substituted attachment fails authentication');
 
+    // ---- recovery ----------------------------------------------------------
+
+    const recovery = await mira.createRecoveryFile();
+    assert.match(recovery.passphrase, /^[a-z2-9]{6}(-[a-z2-9]{6}){3}$/,
+        'the passphrase is generated, grouped and unambiguous');
+    assert.equal(recovery.file.format, 'pm-recovery-v1');
+    assert.ok(recovery.file.iterations >= 600000, 'the derivation is not cheap');
+
+    // The file must not carry the state in the clear.
+    assert.ok(!Buffer.from(recovery.file.state, 'base64').includes(Buffer.from('mira@example')),
+        'the recovery file does not expose the identity');
+    console.log('PASS: a recovery file is produced under a generated passphrase');
+
+    // A fresh device, no stored state at all, recovers from the file.
+    const recoveredStorage = memoryStorage();
+    const recovered = build(2, recoveredStorage);
+    assert.equal(await recovered.resume(), false, 'the replacement device starts empty');
+    await recovered.restoreFromRecoveryFile(recovery.file, recovery.passphrase);
+
+    await ada.send(42, started.groupId, 'recovered and still reading');
+    const afterRecovery = await recovered.receive(42, sync.groupId, 0);
+    assert.ok(afterRecovery.some((message) => message.text === 'recovered and still reading'),
+        'a recovered device reads messages sent after the loss');
+    console.log('PASS: a replacement device recovers and keeps reading');
+
+    await assert.rejects(
+        () => build(2, memoryStorage()).restoreFromRecoveryFile(recovery.file, 'wrong-passphrase-entirely'),
+        /does not open this recovery file/,
+        'the wrong passphrase is refused'
+    );
+    await assert.rejects(
+        () => build(2, memoryStorage()).restoreFromRecoveryFile({ format: 'something-else' }, 'x'),
+        /not a recovery file/,
+        'an unknown file format is refused'
+    );
+    console.log('PASS: a wrong passphrase and an unknown format are both refused');
+
     console.log('Protected client runtime tests passed.');
 })().catch((error) => {
     console.error(error);

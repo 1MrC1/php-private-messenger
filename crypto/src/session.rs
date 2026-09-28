@@ -17,6 +17,7 @@ use openmls_basic_credential::SignatureKeyPair;
 use openmls_memory_storage::MemoryStorage;
 use openmls_rust_crypto::RustCrypto;
 use openmls_traits::OpenMlsProvider;
+use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 
 use crate::CIPHERSUITE;
@@ -240,6 +241,83 @@ impl MlsSession {
     pub fn ratchet_tree(&self, group_id: &[u8]) -> Result<Vec<u8>, JsValue> {
         let group = self.load_group(group_id)?;
         serialize_ratchet_tree(&group)
+    }
+
+    /// Remove a member by its signature key and return the commit the others
+    /// must apply.
+    ///
+    /// After this the removed device is on the far side of a new epoch: it can
+    /// still read what it received before, which is inherent, but it cannot
+    /// read anything sent afterwards.
+    pub fn remove_member(&mut self, group_id: &[u8], signature_key: &[u8]) -> Result<Vec<u8>, JsValue> {
+        let signer = self.signer()?;
+        let mut group = self.load_group(group_id)?;
+
+        let leaf = group
+            .members()
+            .find(|member| member.signature_key.as_slice() == signature_key)
+            .map(|member| member.index)
+            .ok_or_else(|| JsValue::from_str("that member is not in this group"))?;
+
+        let (commit, _welcome, _info) = group
+            .remove_members(&self.provider, &signer, &[leaf])
+            .map_err(|error| JsValue::from_str(&format!("removing the member failed: {error:?}")))?;
+
+        group
+            .merge_pending_commit(&self.provider)
+            .map_err(|error| JsValue::from_str(&format!("merging the removal failed: {error:?}")))?;
+
+        commit
+            .tls_serialize_detached()
+            .map_err(|error| JsValue::from_str(&format!("serialising the removal failed: {error:?}")))
+    }
+
+    /// This device's own signature key, so a caller can name it for removal.
+    pub fn identity_key(&self) -> Vec<u8> {
+        self.signature_public_key.clone()
+    }
+
+    /// A number two people can read to each other to check they are in the
+    /// same conversation with the same keys.
+    ///
+    /// Derived from every member's signature key, sorted so both sides compute
+    /// the same value regardless of who joined first. If the server ever
+    /// substitutes a key, this number changes and the people talking can see
+    /// that it has. It is a comparison aid, not a protocol guarantee: it only
+    /// helps if someone actually compares it out of band.
+    pub fn safety_number(&self, group_id: &[u8]) -> Result<String, JsValue> {
+        let group = self.load_group(group_id)?;
+
+        let mut keys: Vec<Vec<u8>> = group
+            .members()
+            .map(|member| member.signature_key.to_vec())
+            .collect();
+        if keys.is_empty() {
+            return Err(JsValue::from_str("that group has no members"));
+        }
+        keys.sort();
+
+        let mut hasher = Sha256::new();
+        hasher.update(b"pm-safety-number-v1");
+        for key in &keys {
+            hasher.update((key.len() as u32).to_be_bytes());
+            hasher.update(key);
+        }
+        let digest = hasher.finalize();
+
+        // Forty digits in eight groups of five, over two lines: the shape
+        // people can read aloud without losing their place.
+        let mut digits = String::new();
+        for (index, chunk) in digest.chunks(4).take(12).enumerate() {
+            let value = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) % 100000;
+            if index > 0 && index % 4 == 0 {
+                digits.push('\n');
+            } else if index > 0 {
+                digits.push(' ');
+            }
+            digits.push_str(&format!("{value:05}"));
+        }
+        Ok(digits)
     }
 
     fn credential_and_signer(&self) -> Result<(CredentialWithKey, SignatureKeyPair), JsValue> {

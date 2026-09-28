@@ -85,6 +85,44 @@ const decoder = new TextDecoder();
         'a truncated message is refused');
     console.log('PASS: malformed input is refused');
 
+    // ---- safety numbers ----------------------------------------------------
+
+    const aliceNumber = alice.safety_number(groupId);
+    const bobNumber = bob.safety_number(joinedId);
+    assert.equal(aliceNumber, bobNumber, 'both sides compute the same safety number');
+    assert.match(aliceNumber, /^\d{5}( \d{5}){3}\n\d{5}( \d{5}){3}$/,
+        'the safety number is grouped for reading aloud');
+    console.log('PASS: both sides compute the same safety number');
+
+    const other = new module.MlsSession();
+    other.create_identity('carol@example');
+    const otherGroup = other.create_group();
+    assert.notEqual(other.safety_number(otherGroup), aliceNumber,
+        'a different conversation has a different safety number');
+    console.log('PASS: a different conversation has a different safety number');
+
+    // ---- removal ------------------------------------------------------------
+    // The property that matters for a lost or stolen device: after removal it
+    // must not be able to read what is sent next.
+
+    const before = alice.seal(groupId, encoder.encode('before the removal'));
+    assert.equal(decoder.decode(bob.open(joinedId, before)), 'before the removal',
+        'the member reads normally before being removed');
+
+    const removal = alice.remove_member(groupId, bob.identity_key());
+    assert.ok(removal.length > 0, 'removing a member yields a commit for the others');
+
+    const afterRemoval = alice.seal(groupId, encoder.encode('after the removal'));
+    let removedCouldRead = false;
+    try {
+        removedCouldRead = decoder.decode(bob.open(joinedId, afterRemoval)) === 'after the removal';
+    } catch (error) {
+        removedCouldRead = false;
+    }
+    assert.equal(removedCouldRead, false,
+        'a removed device cannot read what is sent after its removal');
+    console.log('PASS: a removed device cannot read later messages');
+
     console.log('MLS session runtime tests passed.');
 })().catch((error) => {
     console.error(error);

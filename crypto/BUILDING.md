@@ -89,20 +89,15 @@ artifacts on every test run.
 
 ## What still does not exist
 
-The engine works and the server can store what it produces. What is missing is
-the wiring between them:
+The engine works, the server stores what it produces, and the browser client
+drives both. What is missing is not wiring any more — it is assurance:
 
-- the browser code that enrolls a device, publishes key packages, claims them,
-  and drives a conversation through `api/chat.php`
-- key material held in IndexedDB under a non-extractable wrapping key
-- any interface: no way to start a protected conversation, no lock, no warning
-- safety numbers, so a substituted key can be noticed by a person
-- key recovery, so losing every device does not silently lose all history
-- attachments, which need their own encryption and lose server-side malware
-  scanning
-- the independent review of **this integration**, which OpenMLS's audit does not
-  cover
+- the **independent review of this integration**, which OpenMLS's own audit does
+  not cover, and which no amount of work in this repository can substitute for
+- the RFC 9420 official test vectors run against this build, so conformance is
+  demonstrated rather than assumed
+- an interoperability matrix across browsers and MLS implementations
 
-None of this makes the application end-to-end encrypted today, and until the
-work in `docs/security/e2ee-readiness.md` is done and independently reviewed,
-nothing should say otherwise.
+Until those exist the application is not end-to-end encrypted in any sense worth
+claiming, and the interface says so in all five languages. See
+`docs/security/e2ee-readiness.md` for the full gate.

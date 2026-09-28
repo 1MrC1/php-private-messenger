@@ -96,6 +96,16 @@ export class MlsSession {
         return v1;
     }
     /**
+     * This device's own signature key, so a caller can name it for removal.
+     * @returns {Uint8Array}
+     */
+    identity_key() {
+        const ret = wasm.mlssession_identity_key(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * Join a group from a welcome delivered by the server.
      * @param {Uint8Array} welcome
      * @param {Uint8Array} ratchet_tree
@@ -160,6 +170,30 @@ export class MlsSession {
         return v2;
     }
     /**
+     * Remove a member by its signature key and return the commit the others
+     * must apply.
+     *
+     * After this the removed device is on the far side of a new epoch: it can
+     * still read what it received before, which is inherent, but it cannot
+     * read anything sent afterwards.
+     * @param {Uint8Array} group_id
+     * @param {Uint8Array} signature_key
+     * @returns {Uint8Array}
+     */
+    remove_member(group_id, signature_key) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(signature_key, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_remove_member(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
      * Rebuild a session from previously exported bytes.
      * @param {Uint8Array} state
      * @param {Uint8Array} signature_public_key
@@ -178,6 +212,38 @@ export class MlsSession {
             throw takeFromExternrefTable0(ret[1]);
         }
         return MlsSession.__wrap(ret[0]);
+    }
+    /**
+     * A number two people can read to each other to check they are in the
+     * same conversation with the same keys.
+     *
+     * Derived from every member's signature key, sorted so both sides compute
+     * the same value regardless of who joined first. If the server ever
+     * substitutes a key, this number changes and the people talking can see
+     * that it has. It is a comparison aid, not a protocol guarantee: it only
+     * helps if someone actually compares it out of band.
+     * @param {Uint8Array} group_id
+     * @returns {string}
+     */
+    safety_number(group_id) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.mlssession_safety_number(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
     }
     /**
      * Seal an application message. The bytes are what the server stores.
