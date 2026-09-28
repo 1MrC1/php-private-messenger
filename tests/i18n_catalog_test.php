@@ -633,6 +633,9 @@ $backendEnvelopeSources = i18nExtractBackendEnvelopeSources(
 $internalBackendMessages = array_fill_keys([
     'Invalid client message identifier',
     'Unable to lock avatar state',
+    // Thrown by the protected-conversation actions and replaced by the generic
+    // invalid-request envelope before it reaches a user.
+    'Envelope is required',
 ], true);
 $missingExtractedBackendSources = [];
 foreach ($backendEnvelopeSources as $source) {

@@ -79,6 +79,74 @@ final class MessageIdempotency
             $fields[] = $attachment['file_name'];
         }
 
+        return self::digest($fields);
+    }
+
+    /**
+     * The same retry protection for a protected conversation, without the
+     * content oracle.
+     *
+     * fingerprint() hashes the plaintext, which is exactly what must not happen
+     * for an encrypted message: anyone holding the database or a backup could
+     * confirm a guessed message by recomputing the digest. Here the ciphertext
+     * and the authenticated-data digest stand in for the content, so the
+     * fingerprint reveals nothing that is not already in the same row.
+     *
+     * A separate domain tag keeps the two schemes from ever colliding.
+     *
+     * The client must seal once and retry the same bytes. Re-encrypting on retry
+     * produces different ciphertext, so the retry would not be recognised as one
+     * — and it would burn MLS key-schedule state.
+     */
+    public static function envelopeFingerprint(
+        int $chatId,
+        string $ciphertext,
+        string $aadDigest,
+        ?int $replyTo,
+        ?array $blob
+    ): string {
+        if ($chatId < 1 || ($replyTo !== null && $replyTo < 1)) {
+            throw new InvalidArgumentException('Invalid message fingerprint identity');
+        }
+        if ($ciphertext === '' || strlen($aadDigest) !== 32) {
+            throw new InvalidArgumentException('Invalid envelope fingerprint input');
+        }
+
+        $fields = [
+            'pm-message-envelope-idempotency-v1',
+            (string)$chatId,
+            $ciphertext,
+            $aadDigest,
+            $replyTo === null ? 'none' : (string)$replyTo,
+        ];
+
+        if ($blob === null) {
+            $fields[] = 'no-blob';
+        } else {
+            // Only what the server can already observe about an encrypted blob.
+            // Deliberately no mime_type and no file_name: for a protected
+            // attachment those are inside the envelope, not metadata.
+            foreach (['sha256', 'size'] as $field) {
+                if (!array_key_exists($field, $blob)) {
+                    throw new InvalidArgumentException('Invalid blob fingerprint');
+                }
+            }
+            $sha256 = strtolower((string)$blob['sha256']);
+            $size = is_int($blob['size']) ? $blob['size'] : 0;
+            if (preg_match('/\A[a-f0-9]{64}\z/D', $sha256) !== 1 || $size < 1) {
+                throw new InvalidArgumentException('Invalid blob fingerprint');
+            }
+            $fields[] = 'blob';
+            $fields[] = $sha256;
+            $fields[] = (string)$size;
+        }
+
+        return self::digest($fields);
+    }
+
+    /** @param list<string> $fields */
+    private static function digest(array $fields): string
+    {
         $context = hash_init('sha256');
         foreach ($fields as $field) {
             // Every field is already bounded by the API/upload limits. An

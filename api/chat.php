@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../classes/Auth.php';
 require_once __DIR__ . '/../classes/I18n.php';
 require_once __DIR__ . '/../classes/Chat.php';
+require_once __DIR__ . '/../classes/ProtectedChat.php';
 
 Auth::configureSession();
 Auth::setPrivateResponseHeaders();
@@ -404,7 +405,10 @@ try {
                 'chats' => $chats,
                 // Remains false until the explicit fleet rollout gate and the
                 // exact online schema/index checks are both ready.
-                'message_idempotency_ready' => $chat->supportsMessageIdempotency()
+                'message_idempotency_ready' => $chat->supportsMessageIdempotency(),
+                // Off unless PM_PROTECTED_CHATS_ENABLED is exactly '1' and the
+                // storage tables verify. Clients must fail closed on false.
+                'protected_chats_ready' => (new ProtectedChat())->supportsProtectedChats()
             ];
             break;
 
@@ -631,6 +635,99 @@ try {
             $emoji = requireApiString($input['emoji'], 'Reaction', 1, 32);
             $result = $chat->addReaction($messageId, $currentUser['id'], $emoji);
             $response = $result;
+            break;
+
+        case 'protect_chat':
+        case 'send_protected_message':
+        case 'get_protected_envelopes':
+        case 'post_handshake':
+        case 'get_handshakes':
+            // Protected conversations are storage-only for now: the server
+            // relays opaque ciphertext and public MLS handshake material. No
+            // cryptography happens here and none of this is reachable until the
+            // fleet-wide flag is set. See docs/security/e2ee-readiness.md before
+            // describing any of it as end-to-end encrypted.
+            $protected = new ProtectedChat();
+            if (!$protected->supportsProtectedChats()) {
+                $response = [
+                    'success' => false,
+                    'message' => 'The request could not be completed',
+                    'error_code' => 'protected_chats_unavailable',
+                    'http_status' => 503,
+                ];
+                break;
+            }
+
+            $protectedChatId = requirePositiveApiId($input['chat_id'] ?? null, 'Chat ID');
+            $currentUserId = (int)$currentUser['id'];
+
+            try {
+                switch ($input['action']) {
+                    case 'protect_chat':
+                        $response = ['success' => true] + $protected->establishProtection(
+                            $protectedChatId,
+                            $currentUserId,
+                            (string)($input['group_id'] ?? ''),
+                            (int)($input['cipher_suite'] ?? 0)
+                        );
+                        break;
+
+                    case 'send_protected_message':
+                        $envelope = $input['envelope'] ?? null;
+                        if (!is_array($envelope)) {
+                            throw new InvalidArgumentException('Envelope is required');
+                        }
+                        $response = ['success' => true] + $protected->storeEnvelope(
+                            $protectedChatId,
+                            $currentUserId,
+                            $envelope
+                        );
+                        break;
+
+                    case 'get_protected_envelopes':
+                        $response = [
+                            'success' => true,
+                            'envelopes' => $protected->envelopesAfter(
+                                $protectedChatId,
+                                $currentUserId,
+                                (int)($input['after_message_id'] ?? 0),
+                                (int)($input['limit'] ?? ProtectedChat::MAX_PAGE)
+                            ),
+                        ];
+                        break;
+
+                    case 'post_handshake':
+                        $response = ['success' => true] + $protected->postHandshake(
+                            $protectedChatId,
+                            $currentUserId,
+                            (int)($input['kind'] ?? 0),
+                            (int)($input['epoch'] ?? -1),
+                            (string)($input['payload'] ?? '')
+                        );
+                        break;
+
+                    default:
+                        $response = [
+                            'success' => true,
+                            'handshakes' => $protected->handshakesAfter(
+                                $protectedChatId,
+                                $currentUserId,
+                                (int)($input['after_sequence'] ?? 0),
+                                (int)($input['limit'] ?? ProtectedChat::MAX_PAGE)
+                            ),
+                        ];
+                        break;
+                }
+            } catch (ProtectedChatMismatch $mismatch) {
+                // A refusal, never a downgrade: the caller is told which way the
+                // mismatch went and nothing is written.
+                $response = [
+                    'success' => false,
+                    'message' => 'The request is invalid',
+                    'error_code' => $mismatch->errorCode(),
+                    'http_status' => 409,
+                ];
+            }
             break;
 
         default:

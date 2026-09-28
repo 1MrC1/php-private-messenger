@@ -56,6 +56,30 @@ attachments still need strict size/rate limits and safe download handling.
 The service will continue to observe delivery metadata unless a separate
 metadata-hiding design is adopted. E2EE must not be described as anonymity.
 
+## What exists today
+
+Two pieces of groundwork have landed. Neither encrypts anything.
+
+1. **The origin no longer trusts a third party** (see below). This was a
+   prerequisite, not a feature.
+2. **Storage for protected conversations**, behind `PM_PROTECTED_CHATS_ENABLED`:
+   `classes/ProtectedChat.php`, four tables added by
+   `migrations/20260928_add_chat_protection_and_envelopes.sql`, and actions on
+   the existing `api/chat.php`. The server stores opaque ciphertext and relays
+   MLS handshake material; it performs no cryptography and cannot tell whether
+   what a client called ciphertext actually is any.
+
+   Decisions worth keeping: protection is chosen when a conversation is created
+   and is irreversible, because upgrading would leave the server holding the
+   plaintext history of a conversation the interface had begun calling
+   protected; a protected message stores `content = ''`, so `LIKE`-based search
+   fails closed with no extra code; and the retry fingerprint has a second
+   domain computed over ciphertext, so it stops being an offline oracle for
+   guessed plaintext.
+
+   Still missing, and all of it required: the client, the key management, device
+   identity, verification, recovery, attachments, and the audit.
+
 ## Prerequisite: nothing else may serve script into this origin
 
 Any host in `script-src` can run code in the origin that would hold the keys.
