@@ -859,6 +859,16 @@
     "people.none_matching": "No se encontraron usuarios que coincidan con \"{{query}}\"",
     "chat.search.type_prompt": "Escribe para buscar mensajes",
     "protected.experimental": "Cifrado experimental (sin auditar)",
-    "protected.banner": "Los mensajes aquí se cifran en tu dispositivo con una implementación que no ha sido revisada de forma independiente. No confíes en ella. La búsqueda, las vistas previas y el análisis de malware no funcionan en esta conversación."
+    "protected.banner": "Los mensajes aquí se cifran en tu dispositivo con una implementación que no ha sido revisada de forma independiente. No confíes en ella. La búsqueda, las vistas previas y el análisis de malware no funcionan en esta conversación.",
+    "protected.start_option": "Proteger esta conversación (experimental)",
+    "protected.start_note": "El cifrado ocurre en tu dispositivo y no ha sido revisado de forma independiente. No se puede activar más tarde, y la búsqueda, las vistas previas y el análisis de archivos no funcionarán ahí.",
+    "protected.start_failed": "No se pudo iniciar la conversación",
+    "protected.not_joined": "Este dispositivo aún no se ha unido a esa conversación protegida",
+    "protected.unreadable": "Este mensaje no se puede leer en este dispositivo",
+    "protected.enroll_title": "Configurar este dispositivo",
+    "protected.enroll_explainer": "Las conversaciones protegidas se cifran por separado en cada dispositivo. Registrar este requiere tu contraseña y un segundo factor, porque añade una clave capaz de leer los mensajes futuros.",
+    "protected.enroll_label": "Nombre de este dispositivo",
+    "protected.enroll_code": "Código de verificación o de respaldo",
+    "protected.enroll_submit": "Configurar dispositivo"
   }
 }

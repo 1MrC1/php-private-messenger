@@ -859,6 +859,16 @@
     "people.none_matching": "未找到与“{{query}}”匹配的用户",
     "chat.search.type_prompt": "输入内容以搜索消息",
     "protected.experimental": "实验性加密（未经审计）",
-    "protected.banner": "此对话中的消息会在你的设备上加密，但所用实现尚未经过独立审计，请勿依赖它。在该对话中，搜索、消息预览和病毒扫描都无法使用。"
+    "protected.banner": "此对话中的消息会在你的设备上加密，但所用实现尚未经过独立审计，请勿依赖它。在该对话中，搜索、消息预览和病毒扫描都无法使用。",
+    "protected.start_option": "保护此对话（实验性）",
+    "protected.start_note": "加密在你的设备上完成，且尚未经过独立审计。该设置无法事后开启，并且在该对话中搜索、消息预览和文件扫描都将无法使用。",
+    "protected.start_failed": "无法创建该对话",
+    "protected.not_joined": "此设备尚未加入该受保护的对话",
+    "protected.unreadable": "此消息无法在该设备上读取",
+    "protected.enroll_title": "设置此设备",
+    "protected.enroll_explainer": "受保护的对话会在每台设备上分别加密。注册此设备需要你的密码和第二因素，因为它会新增一个能够读取后续消息的密钥。",
+    "protected.enroll_label": "此设备的名称",
+    "protected.enroll_code": "验证码或备用码",
+    "protected.enroll_submit": "设置设备"
   }
 }

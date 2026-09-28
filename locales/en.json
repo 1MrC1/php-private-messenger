@@ -859,6 +859,16 @@
     "people.none_matching": "No users found matching \"{{query}}\"",
     "chat.search.type_prompt": "Type to search messages",
     "protected.experimental": "Experimental encryption (unaudited)",
-    "protected.banner": "Messages here are encrypted on your device with an implementation that has not been independently reviewed. Do not rely on it. Search, previews and malware scanning do not work in this conversation."
+    "protected.banner": "Messages here are encrypted on your device with an implementation that has not been independently reviewed. Do not rely on it. Search, previews and malware scanning do not work in this conversation.",
+    "protected.start_option": "Protect this conversation (experimental)",
+    "protected.start_note": "Encryption happens on your device and has not been independently reviewed. It cannot be turned on later, and search, previews and file scanning will not work there.",
+    "protected.start_failed": "Could not start the conversation",
+    "protected.not_joined": "This device has not joined that protected conversation yet",
+    "protected.unreadable": "This message cannot be read on this device",
+    "protected.enroll_title": "Set up this device",
+    "protected.enroll_explainer": "Protected conversations are encrypted on each device separately. Registering this one needs your password and a second factor, because it adds a key that can read future messages.",
+    "protected.enroll_label": "Name for this device",
+    "protected.enroll_code": "Verification or backup code",
+    "protected.enroll_submit": "Set up device"
   }
 }

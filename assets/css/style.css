@@ -7591,3 +7591,28 @@ html[dir="rtl"] .settings-overview-card:hover > .fa-arrow-right {
     color: var(--text-primary);
     margin-inline-end: 8px;
 }
+
+/* The protected-conversation option in the new-conversation dialog. */
+.protected-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 14px 0 4px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.protected-option input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    flex: 0 0 auto;
+}
+
+.protected-option-note {
+    margin: 0 0 10px;
+    color: var(--text-faint);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}

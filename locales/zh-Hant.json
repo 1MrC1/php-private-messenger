@@ -859,6 +859,16 @@
     "people.none_matching": "找不到符合「{{query}}」的使用者",
     "chat.search.type_prompt": "輸入內容以搜尋訊息",
     "protected.experimental": "實驗性加密（未經稽核）",
-    "protected.banner": "此對話中的訊息會在你的裝置上加密，但所用實作尚未經過獨立稽核，請勿依賴它。在該對話中，搜尋、訊息預覽與病毒掃描都無法使用。"
+    "protected.banner": "此對話中的訊息會在你的裝置上加密，但所用實作尚未經過獨立稽核，請勿依賴它。在該對話中，搜尋、訊息預覽與病毒掃描都無法使用。",
+    "protected.start_option": "保護此對話（實驗性）",
+    "protected.start_note": "加密在你的裝置上完成，且尚未經過獨立稽核。此設定無法事後開啟，並且在該對話中搜尋、訊息預覽與檔案掃描都將無法使用。",
+    "protected.start_failed": "無法建立該對話",
+    "protected.not_joined": "此裝置尚未加入該受保護的對話",
+    "protected.unreadable": "此訊息無法在該裝置上讀取",
+    "protected.enroll_title": "設定此裝置",
+    "protected.enroll_explainer": "受保護的對話會在每台裝置上分別加密。註冊此裝置需要你的密碼與第二因素，因為它會新增一個能夠讀取後續訊息的金鑰。",
+    "protected.enroll_label": "此裝置的名稱",
+    "protected.enroll_code": "驗證碼或備用碼",
+    "protected.enroll_submit": "設定裝置"
   }
 }
