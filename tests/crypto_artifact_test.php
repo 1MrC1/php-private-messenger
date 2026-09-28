@@ -165,6 +165,23 @@ cryptoArtifactAssert(
     'the run fails if the pinned cipher suite was skipped as unsupported'
 );
 
+// The vectors run against the library the artifact embeds, so the version has to
+// be pinned in the lock file too — not only in the manifest, which a stale lock
+// could contradict.
+$lock = (string)file_get_contents($root . '/crypto/Cargo.lock');
+cryptoArtifactAssert(
+    preg_match('/name = "openmls"\nversion = "0\.9\.0"\n/', $lock) === 1,
+    'the lock file pins the same OpenMLS version the manifest names'
+);
+cryptoArtifactAssert(
+    // As the regular expression appears in that test, dots escaped and all.
+    str_contains(
+        (string)file_get_contents($root . '/tests/mls_session_runtime_test.js'),
+        'openmls 0\.9\.0'
+    ),
+    'the committed artifact is checked to report that exact version at runtime'
+);
+
 // ---------------------------------------------------------------------------
 // The interoperability harness.
 //

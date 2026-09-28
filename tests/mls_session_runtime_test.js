@@ -20,7 +20,11 @@ const decoder = new TextDecoder();
     // relative to the document, which does not exist here.
     await module.default({ module_or_path: wasm });
 
-    assert.match(module.version(), /openmls/, 'the module reports the OpenMLS build it wraps');
+    // The exact version, not just the name: the known-answer tests in
+    // crypto/tests/ run against this library, and that only means something if
+    // the artifact embeds the same one.
+    assert.match(module.version(), /openmls 0\.9\.0/,
+        'the module reports the exact OpenMLS version the vectors ran against');
     assert.equal(typeof module.ciphersuite(), 'number', 'a cipher suite is pinned');
     console.log('PASS: the committed WebAssembly build loads');
 
