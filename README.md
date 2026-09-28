@@ -40,6 +40,11 @@ All sample data below is invented; no real account or conversation appears.
 - Five interface languages (English, Spanish, Arabic, Simplified and Traditional
   Chinese) with right-to-left support.
 - Responsive single-page interface; mobile layout with a bottom navigation bar.
+- **No third-party requests.** Bootstrap, jQuery and Font Awesome are vendored in
+  `assets/vendor/`, so the app loads nothing from a CDN, works with outbound
+  traffic blocked, and tells no one who is using your instance. The content
+  security policy names no external origin — `tests/csp_posture_test.php` keeps it
+  that way.
 
 The interface calls itself **Messenger**. That name is a placeholder: it lives in
 `index.html` and the `locales/*.json` catalogs, so rename it to whatever you like —

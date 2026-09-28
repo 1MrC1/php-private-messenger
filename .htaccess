@@ -9,7 +9,7 @@ RewriteEngine On
 # Only standard ACME HTTP-01 token names may cross the dot-path boundary.
 RewriteRule ^\.well-known/acme-challenge/[A-Za-z0-9_-]+$ - [L]
 RewriteRule "(^|/)\." - [F,L,NC]
-RewriteRule ^(?:classes|config|docs|migrations|tests|vendor|websocket)(?:/|$) - [F,L,NC]
+RewriteRule ^(?:classes|config|crypto|docs|migrations|tests|vendor|websocket)(?:/|$) - [F,L,NC]
 RewriteCond %{REQUEST_URI} !^/api/(?:attachment|auth|avatar|chat|profile|settings)\.php$
 RewriteRule \.php(?:/|$) - [F,L,NC]
 
@@ -68,7 +68,7 @@ RewriteRule ^.*$ index.html [L]
     # Inline handlers and dynamic code generation are denied. Uploaded content
     # is not a script source and every other resource class is closed unless
     # explicitly needed below.
-    Header always set Content-Security-Policy "default-src 'none'; script-src 'self' https://cdnjs.cloudflare.com; script-src-attr 'none'; style-src 'self' https://cdnjs.cloudflare.com; style-src-attr 'none'; img-src 'self' data: blob:; font-src 'self' https://cdnjs.cloudflare.com; connect-src 'self'; media-src 'self' blob:; manifest-src 'self'; worker-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests" env=!PM_PRIVATE_MEDIA
+    Header always set Content-Security-Policy "default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; manifest-src 'self'; worker-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests" env=!PM_PRIVATE_MEDIA
     Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
     Header always unset X-Powered-By
 </IfModule>

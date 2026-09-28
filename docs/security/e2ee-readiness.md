@@ -56,6 +56,30 @@ attachments still need strict size/rate limits and safe download handling.
 The service will continue to observe delivery metadata unless a separate
 metadata-hiding design is adopted. E2EE must not be described as anonymity.
 
+## Prerequisite: nothing else may serve script into this origin
+
+Any host in `script-src` can run code in the origin that would hold the keys.
+Until 2026-09-28 this application loaded Bootstrap, jQuery and Font Awesome from a
+public CDN, which meant a third party could have served script into the page that
+holds private key material. No end-to-end encryption claim is defensible while
+that is true, no matter how good the protocol underneath is.
+
+Those dependencies are now vendored in `assets/vendor/`, and the application
+policy names no external origin in `script-src`, `style-src`, `font-src` or
+`connect-src`. `tests/csp_posture_test.php` fails the build if one returns.
+
+Two related facts for whoever implements the protocol:
+
+- The policy currently has no `'wasm-unsafe-eval'`, so a WebAssembly MLS
+  implementation **cannot instantiate** until that is deliberately added, and
+  `worker-src 'none'` forbids moving cryptography off the main thread. Both are
+  deliberate weakenings to be argued for in review, not slipped in.
+- `assets/js/security-hardening.js` replaces the legacy rendering paths at load
+  time; it does not delete them. That is sound for message rendering and is *not*
+  a sufficient last line of defence for long-lived key material. The honest
+  boundary this design can defend is the server operator's database and backups —
+  not a browser-side compromise. A cross-site scripting bug defeats it.
+
 ## Safe rollout gates
 
 1. Write and review the threat model, device lifecycle, recovery design, and

@@ -22,8 +22,23 @@ security controls, not conveniences:
   environment flag: a sandboxed `default-src 'none'` for media responses, and the
   application policy elsewhere.
 
-**On nginx**, translate all of the above before going live. A config that merely
-serves the files leaves every internal PHP file reachable. Verify with:
+**On nginx**, use [`nginx.conf`](nginx.conf) in this directory — a complete
+translation of the `.htaccess` rules, including the endpoint allow-list, the
+per-endpoint body limits, the two content security policies and the SPA fallback.
+It was verified by running real nginx and PHP-FPM against this repository: the
+three checks below returned 200/403/403, the six allow-listed endpoints executed
+(returning the application's own `405`/`401` JSON), and `/api/admin.php`,
+`/index.html/x.php`, `/.env`, `/.git/config`, `/composer.json`, `/schema.sql`,
+`/config/database.php` and `/vendor/autoload.php` were all refused.
+
+Two nginx-specific traps that config handles, and that hand-written ones usually
+miss: `add_header` does not accumulate, so a location that sets any header
+discards every inherited one — which is how media responses silently lose their
+sandbox policy; and `location ~ \.php$` alone does not stop path-info smuggling
+such as `/index.html/x.php`.
+
+A config that merely serves the files leaves every internal PHP file reachable.
+Verify with:
 
 ```sh
 curl -sS -o /dev/null -w '%{http_code}\n' https://example.test/            # 200

@@ -21,7 +21,7 @@ repositoryExposureAssert(
 );
 
 repositoryExposureAssert(
-    str_contains($accessRules, 'classes|config|docs|migrations|tests|vendor|websocket') &&
+    str_contains($accessRules, 'classes|config|crypto|docs|migrations|tests|vendor|websocket') &&
         str_contains($accessRules, 'RewriteRule "(^|/)\\." - [F,L,NC]'),
     'internal code, operational material, tests, and dot paths are denied over HTTP'
 );
