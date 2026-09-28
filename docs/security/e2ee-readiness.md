@@ -91,9 +91,24 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    it is not key transparency, and it does not catch a server that lies
    consistently to a client which has never seen the truth.
 
-   Still missing, and all of it required: the browser client that ties these
-   together, persistent group state, enrollment wired to a fresh credential
-   proof, safety-number verification, key recovery, attachments, and the audit.
+5. **The browser client**: `assets/js/protected-chat.js` enrolls a device,
+   protects a conversation, admits the other account's devices, sends, receives
+   and resumes after a reload. Session state lives in IndexedDB wrapped with a
+   non-extractable AES-GCM key. `tests/protected_client_runtime_test.js` drives
+   two devices through a simulated server with the real MLS build and asserts
+   the server holds ciphertext that does not contain the message.
+
+6. **Visible state**: the chat list marks protected conversations and a banner
+   states, in all five languages, that the encryption is unaudited and that
+   search, previews and malware scanning do not work there. Not a padlock — that
+   symbol implies a guarantee this does not have, and a test fails if one
+   appears.
+
+   Still missing, each tracked as an issue: starting a protected conversation
+   from the interface, including the enrollment dialog (#5); encrypted
+   attachments, which also means losing server-side malware scanning (#6); and
+   the independent review of this integration, which is the gate before the
+   words "end-to-end encrypted" may be used anywhere (#7).
 
 ## Prerequisite: nothing else may serve script into this origin
 
