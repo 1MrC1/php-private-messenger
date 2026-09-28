@@ -65,10 +65,13 @@ RewriteRule ^.*$ index.html [L]
     Header always set Cross-Origin-Opener-Policy "same-origin"
     Header always set Cross-Origin-Resource-Policy "same-origin"
     Header always set Content-Security-Policy "sandbox; default-src 'none'" env=PM_PRIVATE_MEDIA
-    # Inline handlers and dynamic code generation are denied. Uploaded content
+    # 'wasm-unsafe-eval' permits WebAssembly instantiation and nothing else: it
+    # does not restore eval() or inline script. The optional MLS layer in
+    # assets/vendor/mls/ cannot load without it. Inline handlers and dynamic
+    # code generation remain denied. Uploaded content
     # is not a script source and every other resource class is closed unless
     # explicitly needed below.
-    Header always set Content-Security-Policy "default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; manifest-src 'self'; worker-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests" env=!PM_PRIVATE_MEDIA
+    Header always set Content-Security-Policy "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; manifest-src 'self'; worker-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests" env=!PM_PRIVATE_MEDIA
     Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
     Header always unset X-Powered-By
 </IfModule>

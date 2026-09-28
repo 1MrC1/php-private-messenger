@@ -2,9 +2,16 @@
 
 **English** · [简体中文](README.zh-Hans.md)
 
-Self-hosted private messaging in plain PHP 8 and MySQL. No framework, no build
-step, no bundler, no JavaScript toolchain — clone it, point a web server at it,
-run `composer install`, and it works.
+Self-hosted private messaging in plain PHP 8 and MySQL. No framework and no
+build step to run it — clone it, point a web server at it, run
+`composer install`, and it works. Nothing is compiled at deploy time and no
+JavaScript toolchain is needed to contribute.
+
+One exception, stated plainly: the **optional** and **unfinished** encryption
+layer under `crypto/` is Rust compiled to WebAssembly. Its output is committed
+and checksummed, so running and deploying still need no toolchain; rebuilding it
+needs Rust, and only if you are changing the cryptography. See
+[crypto/BUILDING.md](crypto/BUILDING.md).
 
 It is a small, deliberately boring codebase with an unusually strict security
 posture: a hardened session model, two-factor authentication with encrypted

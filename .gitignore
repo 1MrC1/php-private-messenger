@@ -23,3 +23,8 @@
 
 # Dependencies are restored with composer, not committed.
 /vendor/
+
+# Rust build outputs. The published artifacts under assets/vendor/mls/ are
+# committed deliberately; these are not.
+/crypto/target/
+/crypto/pkg/

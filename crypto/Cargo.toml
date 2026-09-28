@@ -1,0 +1,32 @@
+[package]
+name = "pm-mls"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "Thin WebAssembly wrapper around OpenMLS for php-private-messenger. Glue only: no cryptographic primitive is implemented here."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pinned exactly. OpenMLS carries an independent SRLabs audit whose fixes
+# shipped in 0.8.1; 0.9.0 postdates them.
+# The `js` feature lets OpenMLS reach browser APIs for randomness and time.
+openmls = { version = "=0.9.0", features = ["js"] }
+openmls_rust_crypto = "=0.6.0"
+openmls_basic_credential = "=0.6.0"
+openmls_traits = "=0.6.0"
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+getrandom = { version = "0.3", features = ["wasm_js"] }
+# A transitive dependency still uses getrandom 0.2, which needs its own feature
+# to know a browser is a valid entropy source. Declared directly so the feature
+# is unified across the graph.
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
