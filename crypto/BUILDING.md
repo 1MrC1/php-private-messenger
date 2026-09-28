@@ -64,11 +64,23 @@ epoch derivation across every epoch in the vector — joiner, welcome, sender-da
 encryption, exporter, authenticator, external, confirmation, membership and
 resumption secrets — and compares each against the published answer.
 
-What does **not** run: message protection, welcome, treekem, transcript, secret
-tree, PSK secret and the passive-client suites, all of which need OpenMLS
-internals a dependent crate cannot reach. So this is conformance of the primitive
-and key-schedule layers, not of the protocol, and it is not a substitute for the
-independent review described in `docs/security/e2ee-readiness.md`.
+The protocol-level suites — message protection, welcome, treekem, tree validation
+and operations, secret tree, PSK secrets, transcript hashes, messages and the
+three passive-client vectors — are exercised by OpenMLS test code kept behind
+`#[cfg(test)]`, which a dependent crate cannot call. They run through OpenMLS's
+own harness instead:
+
+```sh
+crypto/vectors/upstream-kats.sh
+```
+
+That script fetches the crate from crates.io and checks its SHA-256 against the
+`checksum` in `crypto/Cargo.lock` — the same bytes cargo compiles here — pins the
+vectors by digest, and runs sixteen suites. All pass; the result and its exact
+scope are recorded in `docs/security/rfc9420-vectors.md`.
+
+None of it is a substitute for the independent review described in
+`docs/security/e2ee-readiness.md`.
 
 ## Verifying the committed artifacts
 
@@ -127,9 +139,8 @@ drives both. What is missing is not wiring any more — it is assurance:
 
 - the **independent review of this integration**, which OpenMLS's own audit does
   not cover, and which no amount of work in this repository can substitute for
-- the RFC 9420 official test vectors run against this build, so conformance is
-  demonstrated rather than assumed
-- an interoperability matrix across browsers and MLS implementations
+- interoperability with *other* MLS implementations, as opposed to across browser
+  engines, which `crypto/interop/run.mjs` does cover
 
 Until those exist the application is not end-to-end encrypted in any sense worth
 claiming, and the interface says so in all five languages. See

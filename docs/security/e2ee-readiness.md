@@ -162,11 +162,22 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    prove nothing. Each of the three suites was checked to fail on a single
    flipped digit before being trusted.
 
-   The limit is worth stating plainly: the suites that would demonstrate
-   *protocol* conformance — message protection, welcome, treekem, transcript,
-   secret tree, PSK secret, passive client — need OpenMLS internals that a
-   dependent crate cannot reach, so they do not run. What runs covers the
-   primitives, the label encodings and the epoch key schedule.
+   The protocol-level suites — message protection, welcome, treekem, tree
+   validation and operations, secret tree, PSK secret, transcript hashes,
+   messages, and the three passive-client vectors — are exercised by test code
+   OpenMLS keeps behind `#[cfg(test)]`, which no dependent crate can call. They
+   run through OpenMLS's own harness instead: `crypto/vectors/upstream-kats.sh`
+   fetches the crate from crates.io, **checks its SHA-256 against the `checksum`
+   line in `crypto/Cargo.lock`** — the same bytes cargo compiles for our
+   WebAssembly, verified rather than assumed — pins the vectors by digest, and
+   runs them. Sixteen suites, all passing, against checksum
+   `b6b08d90…99a8c8`. Recorded in `docs/security/rfc9420-vectors.md`.
+
+   What that establishes and what it does not: the implementation inside the
+   committed artifact is the published OpenMLS 0.9.0 and passes every published
+   suite. It says nothing about the wrapper, which adds no protocol logic — the
+   two constructions that are ours, the storage framing and the safety number,
+   sit outside the protocol and are documented as such.
 
 12. **Revocation that actually reaches the conversation**: revoking a device in
    settings stops it being offered new key packages. On its own that does
@@ -204,10 +215,10 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    *other* MLS implementations, which is what the protocol-level vectors above
    would show.
 
-   What remains is the one thing that cannot be written here: the independent
-   review of this integration (#7), and the protocol-level vectors. Until those
-   land the wording stays as it is — "experimental", "unaudited", and never
-   "end-to-end encrypted".
+   What remains is the one thing that cannot be written here at all: the
+   independent review of this integration (#7). Until it happens the wording
+   stays as it is — "experimental", "unaudited", and never "end-to-end
+   encrypted".
 
 ## Prerequisite: nothing else may serve script into this origin
 

@@ -28,3 +28,13 @@ through OpenMLS's own runners; `crypto-basics` goes through the provider with th
 label encodings written out from the RFC. None of it is protocol-level
 conformance, and none of it substitutes for the independent review that
 `docs/security/e2ee-readiness.md` still requires.
+
+## Why OpenMLS's own copy differs
+
+OpenMLS vendors `crypto-basics.json` too, and its file is not byte-identical to
+this one. They are not in conflict: the vectors are generated, so the two are
+different random instances of the same tests, and both pass. The copy here comes
+from the working group, which is the authoritative source. The protocol-level
+suites that run through OpenMLS's own harness use its vendored copies, pinned
+separately in `crypto/vectors/UPSTREAM-VECTORS.sha256` — see
+`docs/security/rfc9420-vectors.md`.

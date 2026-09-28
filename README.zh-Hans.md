@@ -172,6 +172,17 @@ cd crypto && cargo test --test rfc9420_vectors -- --nocapture
 这些向量按摘要固定。`tests/crypto_artifact_test.php` 在不需要任何工具链的情况下校验这些
 摘要，所以若有人改动向量去迁就一个本该失败的构建，普通测试套件就会先失败。
 
+协议层的那些向量在 OpenMLS 里位于 `#[cfg(test)]` 之后，依赖方无法调用，因此改由它自己的
+测试框架来跑；脚本会把 crates.io 上的 crate 压缩包与 `crypto/Cargo.lock` 里的校验和逐字节
+核对：
+
+```sh
+crypto/vectors/upstream-kats.sh
+```
+
+共 16 个套件，包含 passive-client 向量。它能证明什么、不能证明什么，写在
+`docs/security/rfc9420-vectors.md` 里。
+
 还有一组跨浏览器互操作测试，需要 Playwright 的浏览器：
 
 ```sh

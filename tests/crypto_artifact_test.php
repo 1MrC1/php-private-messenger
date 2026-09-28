@@ -183,6 +183,56 @@ cryptoArtifactAssert(
 );
 
 // ---------------------------------------------------------------------------
+// The protocol-level vectors, which run through OpenMLS's own harness.
+//
+// Those suites live behind `#[cfg(test)]` upstream, so they cannot be called
+// from a dependent crate. The script that runs them only means something if it
+// verifies the crate bytes against this repository's lock file, so that step is
+// pinned here rather than trusted.
+// ---------------------------------------------------------------------------
+
+$kats = (string)file_get_contents($root . '/crypto/vectors/upstream-kats.sh');
+cryptoArtifactAssert($kats !== '', 'the upstream known-answer test script is present');
+cryptoArtifactAssert(
+    str_contains($kats, 'crypto/Cargo.lock') && str_contains($kats, 'REFUSING TO RUN'),
+    'it reads the pinned version and checksum from the lock file and refuses to run on a mismatch'
+);
+cryptoArtifactAssert(
+    str_contains($kats, 'UPSTREAM-VECTORS.sha256') && str_contains($kats, '--check'),
+    'it checks the upstream vectors against the digests recorded here'
+);
+cryptoArtifactAssert(
+    str_contains($kats, 'the upstream line this patches has changed'),
+    'the one upstream line it rewrites fails loudly if it is not what was expected'
+);
+
+$upstreamSums = (string)file_get_contents($root . '/crypto/vectors/UPSTREAM-VECTORS.sha256');
+foreach ([
+    'passive-client-welcome.json',
+    'passive-client-random.json',
+    'passive-client-handling-commit.json',
+    'message-protection.json',
+    'treekem.json',
+    'tree-validation.json',
+    'secret-tree.json',
+    'psk_secret.json',
+    'transcript-hashes.json',
+    'welcome.json',
+] as $vector) {
+    cryptoArtifactAssert(
+        preg_match('/^[a-f0-9]{64}\s+\*?' . preg_quote($vector, '/') . '$/m', $upstreamSums) === 1,
+        'the protocol-level vector is pinned: ' . $vector
+    );
+}
+cryptoArtifactAssert(
+    str_contains(
+        (string)file_get_contents($root . '/docs/security/rfc9420-vectors.md'),
+        'b6b08d90fc020cb5354d5f08ca17711b84c82e2bcc7331753fd94f000d99a8c8'
+    ),
+    'the recorded result names the exact crate checksum it was obtained against'
+);
+
+// ---------------------------------------------------------------------------
 // The interoperability harness.
 //
 // It is not part of the suite — it needs browsers — but it must keep obeying the

@@ -200,6 +200,17 @@ The vectors are pinned by digest and `tests/crypto_artifact_test.php` checks
 those digests without any toolchain, so vectors edited to make a failing build
 pass fail the ordinary suite instead.
 
+The protocol-level suites live behind `#[cfg(test)]` in OpenMLS, so they run
+through its own harness, against a crate archive checked byte for byte against
+`crypto/Cargo.lock`:
+
+```sh
+crypto/vectors/upstream-kats.sh
+```
+
+Sixteen suites, including the passive-client vectors. What that does and does not
+establish is written out in `docs/security/rfc9420-vectors.md`.
+
 There is also a cross-browser matrix, which needs Playwright's browsers:
 
 ```sh

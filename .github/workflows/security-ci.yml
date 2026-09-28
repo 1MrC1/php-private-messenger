@@ -122,3 +122,10 @@ jobs:
         shell: bash
         working-directory: crypto
         run: cargo test --test rfc9420_vectors -- --nocapture
+
+      # The protocol-level suites sit behind `#[cfg(test)]` upstream, so they run
+      # through OpenMLS's own harness, against a crate archive checked against
+      # our lock file.
+      - name: Run the protocol-level suites through OpenMLS's harness
+        shell: bash
+        run: crypto/vectors/upstream-kats.sh
