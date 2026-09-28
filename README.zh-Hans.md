@@ -172,6 +172,16 @@ cd crypto && cargo test --test rfc9420_vectors -- --nocapture
 这些向量按摘要固定。`tests/crypto_artifact_test.php` 在不需要任何工具链的情况下校验这些
 摘要，所以若有人改动向量去迁就一个本该失败的构建，普通测试套件就会先失败。
 
+还有一组跨浏览器互操作测试，需要 Playwright 的浏览器：
+
+```sh
+node crypto/interop/run.mjs
+```
+
+它在每个 JS 引擎里各放一台设备，并对所有有序组合真正跑一遍会话。结果、版本与局限记录在
+`docs/security/browser-interop.md`；`crypto/interop/harness.html` 也可以直接在任意
+浏览器（包括手机）里打开自行查看。
+
 按工作流同样的方式做静态检查：
 
 ```sh

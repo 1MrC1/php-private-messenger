@@ -168,10 +168,25 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    dependent crate cannot reach, so they do not run. What runs covers the
    primitives, the label encodings and the epoch key schedule.
 
+12. **Interoperability across engines**: `crypto/interop/run.mjs` puts one
+   device in each of Chromium, Firefox and WebKit and has them hold a real
+   conversation in every ordered pair — identity, welcome, a message sealed in
+   one engine and opened in another, a reply back, the safety number agreeing
+   across engines, a membership change applied, a removal refused to the removed
+   device, and exported state surviving a reload. All nine pairs pass. It also
+   probes what the client needs besides WebAssembly: a non-extractable AES-GCM
+   key, that key surviving IndexedDB, and PBKDF2-SHA512 at 600 000 iterations.
+   Versions, timings and limits are in `docs/security/browser-interop.md`.
+
+   Limits, stated there and worth repeating: headless desktop builds on one
+   machine, no real mobile browsers, and nothing about interoperability with
+   *other* MLS implementations, which is what the protocol-level vectors above
+   would show.
+
    What remains is the one thing that cannot be written here: the independent
-   review of this integration (#7), the protocol-level vectors above, and a
-   browser interoperability matrix. Until those land the wording stays as it is
-   — "experimental", "unaudited", and never "end-to-end encrypted".
+   review of this integration (#7), and the protocol-level vectors. Until those
+   land the wording stays as it is — "experimental", "unaudited", and never
+   "end-to-end encrypted".
 
 ## Prerequisite: nothing else may serve script into this origin
 

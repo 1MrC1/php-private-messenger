@@ -1,0 +1,4 @@
+/* The harness obeys the same policy the application does: no inline style, no
+   inline script. Under the app's CSP an inline block is simply not executed. */
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 24px; }
+  #log { white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }

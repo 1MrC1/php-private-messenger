@@ -165,4 +165,31 @@ cryptoArtifactAssert(
     'the run fails if the pinned cipher suite was skipped as unsupported'
 );
 
+// ---------------------------------------------------------------------------
+// The interoperability harness.
+//
+// It is not part of the suite — it needs browsers — but it must keep obeying the
+// policy the application obeys, or it would be testing a page the application
+// could never serve.
+// ---------------------------------------------------------------------------
+
+$harness = (string)file_get_contents($root . '/crypto/interop/harness.html');
+cryptoArtifactAssert($harness !== '', 'the interoperability harness is present');
+cryptoArtifactAssert(
+    !preg_match('/<script(?![^>]*\bsrc=)[^>]*>\s*\S/', $harness) &&
+        !preg_match('/<style[^>]*>\s*\S/', $harness),
+    'the harness carries no inline script or style, exactly as the policy requires'
+);
+cryptoArtifactAssert(
+    str_contains($harness, 'harness.js') && str_contains(
+        (string)file_get_contents($root . '/crypto/interop/harness.js'),
+        'assets/vendor/mls/pm_mls.js'
+    ),
+    'the harness loads the committed artifact rather than a copy of its own'
+);
+cryptoArtifactAssert(
+    str_contains((string)file_get_contents($root . '/docs/security/browser-interop.md'), 'Results'),
+    'the interoperability results are recorded, with versions and a date'
+);
+
 echo "Crypto artifact tests passed.\n";

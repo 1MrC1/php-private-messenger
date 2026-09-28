@@ -200,6 +200,17 @@ The vectors are pinned by digest and `tests/crypto_artifact_test.php` checks
 those digests without any toolchain, so vectors edited to make a failing build
 pass fail the ordinary suite instead.
 
+There is also a cross-browser matrix, which needs Playwright's browsers:
+
+```sh
+node crypto/interop/run.mjs
+```
+
+It puts one device in each engine and has them hold a real conversation, in every
+ordered pair. Results, versions and limits are recorded in
+`docs/security/browser-interop.md`; `crypto/interop/harness.html` can be opened
+by hand in any browser, a phone included.
+
 Lint the way the workflows do:
 
 ```sh
