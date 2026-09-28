@@ -1,5 +1,7 @@
 # php-private-messenger
 
+**English** · [简体中文](README.zh-Hans.md)
+
 Self-hosted private messaging in plain PHP 8 and MySQL. No framework, no build
 step, no bundler, no JavaScript toolchain — clone it, point a web server at it,
 run `composer install`, and it works.
@@ -153,7 +155,7 @@ No PHPUnit and no Jest; tests are plain scripts that print `PASS:` lines and exi
 non-zero on failure.
 
 ```sh
-for t in tests/*_test.php; do php "$t"; done          # 19 PHP suites
+for t in tests/*_test.php; do php "$t"; done          # 21 PHP suites
 for t in tests/*_runtime_test.js; do node "$t"; done   # 2 client suites
 php tests/i18n_catalog_test.php                        # a single suite
 ```
