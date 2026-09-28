@@ -345,6 +345,28 @@
             refs.name.textContent = title;
             if (hasTitle) refs.name.removeAttribute('data-i18n-fallback');
             else refs.name.dataset.i18nFallback = 'common.unknown';
+
+            // Protected conversations are marked so the state is visible rather
+            // than assumed. The label deliberately says experimental: the
+            // encryption has not been independently reviewed, and a padlock
+            // alone would imply a guarantee this does not yet have.
+            item.dataset.protected = chat.is_protected === true ? 'true' : 'false';
+            // Setting name.textContent above detaches any previous mark, so
+            // re-attach whenever it is missing rather than only once.
+            if (chat.is_protected === true && (!refs.protectedMark || !refs.protectedMark.isConnected)) {
+                const mark = document.createElement('span');
+                mark.className = 'chat-protected-mark';
+                // Drawn in CSS: a glyph in JavaScript would be an untranslatable
+                // string literal in a file the localisation audit reads.
+                mark.title = localized('protected.experimental', {},
+                    'Experimental encryption (unaudited)');
+                mark.setAttribute('aria-label', mark.title);
+                refs.name.appendChild(mark);
+                refs.protectedMark = mark;
+            } else if (chat.is_protected !== true && refs.protectedMark) {
+                refs.protectedMark.remove();
+                refs.protectedMark = null;
+            }
             const hasServerPreview = chat.last_message !== null && chat.last_message !== undefined &&
                 asString(chat.last_message) !== '';
             const serverPreview = hasServerPreview ? asString(chat.last_message) : '';

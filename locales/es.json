@@ -857,6 +857,8 @@
     "profile.sender_avatar": "Avatar del remitente",
     "people.type_minimum": "Escribe al menos 2 caracteres para buscar",
     "people.none_matching": "No se encontraron usuarios que coincidan con \"{{query}}\"",
-    "chat.search.type_prompt": "Escribe para buscar mensajes"
+    "chat.search.type_prompt": "Escribe para buscar mensajes",
+    "protected.experimental": "Cifrado experimental (sin auditar)",
+    "protected.banner": "Los mensajes aquí se cifran en tu dispositivo con una implementación que no ha sido revisada de forma independiente. No confíes en ella. La búsqueda, las vistas previas y el análisis de malware no funcionan en esta conversación."
   }
 }

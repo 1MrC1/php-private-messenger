@@ -7560,3 +7560,17 @@ html[dir="rtl"] .settings-overview-card:hover > .fa-arrow-right {
     }
 }
 
+
+/* Marks a conversation whose messages are encrypted on the device. The label is
+   deliberately "experimental": the implementation has not been independently
+   reviewed, and a padlock alone would imply a guarantee this does not have. */
+.chat-protected-mark {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-inline-start: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    vertical-align: middle;
+    flex: 0 0 auto;
+}

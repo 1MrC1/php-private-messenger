@@ -250,4 +250,45 @@ foreach (['classes/ProtectedChat.php', 'api/chat.php', 'migrations/20260928_add_
     );
 }
 
+// ---- the state is visible, and honestly labelled ---------------------------
+
+$chatClass = (string)file_get_contents($root . '/classes/Chat.php');
+protectedAssert(
+    str_contains($chatClass, 'AS is_protected'),
+    'the chat list reports which conversations are protected'
+);
+
+$renderer = (string)file_get_contents($root . '/assets/js/security-hardening.js');
+protectedAssert(
+    str_contains($renderer, 'chat-protected-mark'),
+    'the interface marks a protected conversation'
+);
+protectedAssert(
+    str_contains($renderer, "localized('protected.experimental'"),
+    'the mark is labelled from the catalog, not a hardcoded string'
+);
+protectedAssert(
+    !preg_match('/padlock|\\u{1F512}/u', $renderer),
+    'no padlock is shown, because it would imply a guarantee this does not have'
+);
+
+$english = json_decode((string)file_get_contents($root . '/locales/en.json'), true)['messages'];
+protectedAssert(
+    str_contains(strtolower($english['protected.experimental']), 'experimental') &&
+        str_contains(strtolower($english['protected.experimental']), 'unaudited'),
+    'the label says both experimental and unaudited'
+);
+protectedAssert(
+    str_contains(strtolower($english['protected.banner']), 'not') &&
+        str_contains(strtolower($english['protected.banner']), 'independently reviewed'),
+    'the banner states the implementation has not been independently reviewed'
+);
+foreach (['es', 'ar', 'zh-Hans', 'zh-Hant'] as $locale) {
+    $messages = json_decode((string)file_get_contents($root . '/locales/' . $locale . '.json'), true)['messages'];
+    protectedAssert(
+        isset($messages['protected.experimental'], $messages['protected.banner']),
+        $locale . ' carries the protected-conversation warnings'
+    );
+}
+
 echo "Protected chat tests passed.\n";

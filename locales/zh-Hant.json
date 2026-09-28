@@ -857,6 +857,8 @@
     "profile.sender_avatar": "傳送者頭像",
     "people.type_minimum": "輸入至少 2 個字元以搜尋",
     "people.none_matching": "找不到符合「{{query}}」的使用者",
-    "chat.search.type_prompt": "輸入內容以搜尋訊息"
+    "chat.search.type_prompt": "輸入內容以搜尋訊息",
+    "protected.experimental": "實驗性加密（未經稽核）",
+    "protected.banner": "此對話中的訊息會在你的裝置上加密，但所用實作尚未經過獨立稽核，請勿依賴它。在該對話中，搜尋、訊息預覽與病毒掃描都無法使用。"
   }
 }

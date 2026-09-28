@@ -857,6 +857,8 @@
     "profile.sender_avatar": "发送者头像",
     "people.type_minimum": "输入至少 2 个字符以搜索",
     "people.none_matching": "未找到与“{{query}}”匹配的用户",
-    "chat.search.type_prompt": "输入内容以搜索消息"
+    "chat.search.type_prompt": "输入内容以搜索消息",
+    "protected.experimental": "实验性加密（未经审计）",
+    "protected.banner": "此对话中的消息会在你的设备上加密，但所用实现尚未经过独立审计，请勿依赖它。在该对话中，搜索、消息预览和病毒扫描都无法使用。"
   }
 }

@@ -574,7 +574,10 @@ class Chat
                     WHERE unread_message.chat_id = c.id
                       AND unread_message.sender_id != ?
                       AND unread_message.is_deleted = FALSE
-                ) AS unread_count
+                ) AS unread_count,
+                EXISTS(
+                    SELECT 1 FROM chat_protection protection WHERE protection.chat_id = c.id
+                ) AS is_protected
             FROM chats c
             JOIN chat_participants cp ON c.id = cp.chat_id
             LEFT JOIN messages latest_message
@@ -605,6 +608,7 @@ class Chat
                         $row['other_user'] = $other_user;
                     }
                 }
+                $row['is_protected'] = (bool)($row['is_protected'] ?? false);
                 $chats[] = $row;
             }
 

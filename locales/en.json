@@ -857,6 +857,8 @@
     "profile.sender_avatar": "Sender avatar",
     "people.type_minimum": "Type at least 2 characters to search",
     "people.none_matching": "No users found matching \"{{query}}\"",
-    "chat.search.type_prompt": "Type to search messages"
+    "chat.search.type_prompt": "Type to search messages",
+    "protected.experimental": "Experimental encryption (unaudited)",
+    "protected.banner": "Messages here are encrypted on your device with an implementation that has not been independently reviewed. Do not rely on it. Search, previews and malware scanning do not work in this conversation."
   }
 }
