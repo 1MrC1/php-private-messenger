@@ -788,6 +788,110 @@ try {
             }
             break;
 
+        case 'enroll_device':
+        case 'revoke_device':
+            // Enrolling a device adds a key that can read future messages in
+            // every protected conversation this account joins, and revoking one
+            // takes that away. Both are account security changes, so both
+            // demand the current password AND a fresh second factor -- the same
+            // bar as disabling two-factor authentication.
+            require_once __DIR__ . '/../classes/ProtectedChat.php';
+            require_once __DIR__ . '/../classes/DeviceDirectory.php';
+
+            if (!ProtectedChat::isEnabled()) {
+                $response = ['success' => false, 'message' => 'Settings request failed'];
+                http_response_code(503);
+                break;
+            }
+
+            $deviceCode = settingsSecondFactorCode($input);
+            if (!isset($input['current_password']) || !is_string($input['current_password']) ||
+                $input['current_password'] === '' || $deviceCode === null) {
+                http_response_code(403);
+                throw new Exception('Current password and a fresh 2FA code are required');
+            }
+            if (strlen($input['current_password']) > 1024) {
+                http_response_code(429);
+                throw new Exception('Too many password attempts. Try again later.');
+            }
+
+            require_once __DIR__ . '/../classes/TwoFactor.php';
+            $deviceIdentity = (string)(int)$currentUser['id'];
+            if (!Auth::reserveRateLimitAttempt('account_password', $deviceIdentity, 5, 900)) {
+                http_response_code(429);
+                throw new Exception('Too many password attempts. Try again later.');
+            }
+            if (!Auth::reserveRateLimitAttempt('device_enrollment', $deviceIdentity, 10, 900)) {
+                Auth::releaseRateLimitAttempt('account_password', $deviceIdentity);
+                http_response_code(429);
+                throw new Exception('Too many verification attempts. Try again later.');
+            }
+
+            $storedHash = null;
+            $hashStatement = $conn->prepare('SELECT password_hash FROM users WHERE id = ?');
+            $hashStatement->bind_param('i', $currentUser['id']);
+            $hashStatement->execute();
+            $hashRow = $hashStatement->get_result()->fetch_assoc();
+            $hashStatement->close();
+            $storedHash = is_array($hashRow) ? (string)$hashRow['password_hash'] : null;
+
+            if ($storedHash === null || !password_verify($input['current_password'], $storedHash)) {
+                Auth::releaseRateLimitAttempt('device_enrollment', $deviceIdentity);
+                http_response_code(403);
+                throw new Exception('Current password is incorrect');
+            }
+
+            // Binds the factor to the session's authentication versions, so a
+            // credential change mid-flow cannot consume a code for a stale one.
+            $deviceFactor = (new TwoFactorAuthentication())->verifyAndConsumeSecondFactorForAuthenticationState(
+                (int)$currentUser['id'],
+                $deviceCode,
+                $sessionAuthVersion,
+                $sessionTwoFactorVersion
+            );
+            if (!$deviceFactor['success']) {
+                if ($deviceFactor['reason'] === 'stale') {
+                    http_response_code(401);
+                    throw new Exception('Authentication state changed. Please sign in again.');
+                }
+                http_response_code(403);
+                throw new Exception('Invalid verification code or backup code');
+            }
+
+            // The factor is spent from here on. A failure below costs the user
+            // one code; it cannot be replayed, so this is a usability cost
+            // rather than a security one.
+            Auth::clearRateLimit('account_password', $deviceIdentity);
+            Auth::clearRateLimit('device_enrollment', $deviceIdentity);
+
+            try {
+                $directory = new DeviceDirectory($conn);
+                if ($input['action'] === 'enroll_device') {
+                    $response = ['success' => true] + $directory->enrollDevice(
+                        (int)$currentUser['id'],
+                        (string)($input['public_id'] ?? ''),
+                        (string)($input['signature_public_key'] ?? ''),
+                        (string)($input['credential'] ?? ''),
+                        (int)($input['cipher_suite'] ?? 0),
+                        isset($input['label']) && is_string($input['label']) ? $input['label'] : null,
+                        is_array($input['key_packages'] ?? null) ? $input['key_packages'] : []
+                    );
+                } else {
+                    $response = ['success' => true] + $directory->revokeDevice(
+                        (int)$currentUser['id'],
+                        (int)($input['device_id'] ?? 0)
+                    );
+                }
+            } catch (ProtectedChatMismatch $mismatch) {
+                http_response_code(409);
+                $response = [
+                    'success' => false,
+                    'message' => 'Settings request failed',
+                    'error_code' => $mismatch->errorCode(),
+                ];
+            }
+            break;
+
         case 'disable_2fa':
             $code = settingsSecondFactorCode($input);
             if (!isset($input['current_password']) || !is_string($input['current_password']) ||

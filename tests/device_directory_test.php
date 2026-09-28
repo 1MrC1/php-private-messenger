@@ -173,4 +173,46 @@ deviceAssert(
     'enrollment and revocation are not reachable from the chat endpoint'
 );
 
+// ---- the enrollment gate ---------------------------------------------------
+// Enrolling a device adds a key that can read future messages, so it must not
+// be reachable with a session alone.
+
+$settings = (string)file_get_contents($root . '/api/settings.php');
+$enrollCase = strpos($settings, "case 'enroll_device':");
+deviceAssert($enrollCase !== false, 'enrollment is served from the settings endpoint');
+
+$section = substr($settings, $enrollCase, 5000);
+$order = [
+    'flag' => strpos($section, 'ProtectedChat::isEnabled()'),
+    'credentials required' => strpos($section, "Current password and a fresh 2FA code are required"),
+    'password limiter' => strpos($section, "'account_password'"),
+    'factor limiter' => strpos($section, "'device_enrollment'"),
+    'password verified' => strpos($section, 'password_verify('),
+    'factor consumed' => strpos($section, 'verifyAndConsumeSecondFactorForAuthenticationState'),
+    'device written' => strpos($section, '->enrollDevice('),
+];
+foreach ($order as $label => $position) {
+    deviceAssert($position !== false, 'the enrollment gate includes: ' . $label);
+}
+$positions = array_values($order);
+$sorted = $positions;
+sort($sorted);
+deviceAssert(
+    $positions === $sorted,
+    'the gate runs in order: flag, credentials, limits, password, factor, then the write'
+);
+deviceAssert(
+    strpos($section, 'verifyAndConsumeSecondFactorForAuthenticationState') <
+        strpos($section, '->enrollDevice('),
+    'no device is stored before a second factor has been consumed'
+);
+deviceAssert(
+    str_contains($section, "\$sessionAuthVersion") && str_contains($section, "\$sessionTwoFactorVersion"),
+    'the consumed factor is bound to the session authentication state'
+);
+deviceAssert(
+    str_contains($section, "case 'revoke_device':"),
+    'revocation is held to the same bar as enrollment'
+);
+
 echo "Device directory tests passed.\n";
