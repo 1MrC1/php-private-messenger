@@ -16,6 +16,18 @@ inline handlers and `eval`. Every one of those properties has a regression test.
 > design that would be required, and do not describe a deployment of this code
 > as E2EE.
 
+## Screenshots
+
+All sample data below is invented; no real account or conversation appears.
+
+| Conversation | Settings |
+|---|---|
+| ![A direct message thread, with a quoted reply, read receipts and unread badges in the conversation list](docs/screenshots/conversation.png) | ![The settings panel open on the profile section](docs/screenshots/settings.png) |
+
+| Sign in | Mobile |
+|---|---|
+| ![The sign-in dialog, with login and register tabs and a language selector](docs/screenshots/sign-in.png) | <img src="docs/screenshots/mobile.png" alt="The conversation list on a phone-width screen, with a bottom navigation bar" width="280"> |
+
 ## Features
 
 - One-to-one and group chats, replies, reactions, edits, deletes, read receipts,
