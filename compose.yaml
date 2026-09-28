@@ -1,0 +1,85 @@
+# Local development stack: nginx + PHP-FPM + MySQL.
+#
+#   cp .env.example .env     # optional; sensible development defaults are below
+#   docker compose up --build
+#   open http://127.0.0.1:8088
+#
+# This is for development. It is not a production deployment:
+#   * the database password below is a fixed, published string
+#   * no TLS, and the application sets Secure session cookies, so sign-in works
+#     over http://127.0.0.1 only because browsers treat localhost as secure
+#   * no ClamAV, so uploads are refused by design (PM_CLAMD_ENDPOINT is unset)
+#
+# The web container serves the repository through the same rules as
+# docs/nginx.conf, so what you test locally has the same exposure surface as a
+# real deployment: internal directories denied, only the six API entry points
+# executable, uploads unreachable except through the authenticated endpoints.
+
+name: php-private-messenger
+
+services:
+  db:
+    image: mysql:8.0
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root-development-only}
+      MYSQL_DATABASE: ${PM_DB_NAME:-messenger}
+      MYSQL_USER: ${PM_DB_USERNAME:-messenger}
+      MYSQL_PASSWORD: ${PM_DB_PASSWORD:-local-development-password-0123456789012345}
+    volumes:
+      # Applied in filename order on first start: base schema, then every
+      # migration. The migrations are idempotent, so re-running is harmless.
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./migrations/20260808_add_totp_replay_protection.sql:/docker-entrypoint-initdb.d/02-totp-replay.sql:ro
+      - ./migrations/20260808_encrypt_totp_secrets.sql:/docker-entrypoint-initdb.d/03-totp-encrypt.sql:ro
+      - ./migrations/20260808_add_message_idempotency.sql:/docker-entrypoint-initdb.d/04-idempotency.sql:ro
+      - ./migrations/20260928_add_chat_protection_and_envelopes.sql:/docker-entrypoint-initdb.d/05-protected-chats.sql:ro
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root-development-only}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The browser reaches the stack here, and the API refuses cross-origin
+      # state changes by comparing against this value.
+      PM_SITE_URL: ${PM_SITE_URL:-http://127.0.0.1:8088}
+      # Storage for protected conversations. Off unless you set it; it enables
+      # opaque-byte storage, not encryption.
+      PM_PROTECTED_CHATS_ENABLED: ${PM_PROTECTED_CHATS_ENABLED:-}
+      PM_DB_HOST: db
+      PM_DB_NAME: ${PM_DB_NAME:-messenger}
+      PM_DB_USERNAME: ${PM_DB_USERNAME:-messenger}
+      # Minimum 32 characters, enforced by config/database.php.
+      PM_DB_PASSWORD: ${PM_DB_PASSWORD:-local-development-password-0123456789012345}
+      PM_BACKUP_CODE_PEPPER: ${PM_BACKUP_CODE_PEPPER:-local-development-pepper-0123456789012345}
+      PM_TOTP_ENCRYPTION_KEY: ${PM_TOTP_ENCRYPTION_KEY:-local-development-totp-key-0123456789012345}
+      # Uploads fail closed without a scanner. Point this at a clamd socket you
+      # mount in if you need to exercise them.
+      # PM_CLAMD_ENDPOINT: unix:///run/clamav/clamd.sock
+    volumes:
+      - .:/var/www/messenger
+      - sessions:/var/lib/messenger/sessions
+
+  web:
+    image: nginx:1.27-alpine
+    depends_on: [app]
+    ports:
+      # Loopback only: this stack has no TLS and no production hardening.
+      - "127.0.0.1:8088:80"
+    volumes:
+      - .:/var/www/messenger:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/php.inc:/etc/nginx/conf.d/php.inc:ro
+
+volumes:
+  db-data:
+  sessions:

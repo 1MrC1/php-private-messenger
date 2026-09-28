@@ -146,6 +146,22 @@ sessionAllocationAssert(
     'real accounts share the pre-database threshold without a redundant schema query'
 );
 
+// The tracked open_basedir must permit the session directory the deployment
+// documentation tells operators to use. When these disagree, session_start()
+// fails and every authenticated request degrades in a way that is easy to miss.
+$userIni = (string)file_get_contents(__DIR__ . '/../.user.ini');
+preg_match('/^open_basedir=(.*)$/m', $userIni, $baseDirMatch);
+$allowedPaths = array_filter(explode(':', trim($baseDirMatch[1] ?? '')));
+$sessionRoot = '/var/lib/messenger/';
+sessionAllocationAssert(
+    in_array($sessionRoot, $allowedPaths, true),
+    'open_basedir permits the documented session directory (' . $sessionRoot . ')'
+);
+sessionAllocationAssert(
+    in_array('/var/www/messenger/', $allowedPaths, true),
+    'open_basedir still permits the document root'
+);
+
 $runtimeDirectoryPolicy = file_get_contents(
     __DIR__ . '/../docs/security/messenger-runtime.tmpfiles.conf'
 );

@@ -53,6 +53,21 @@ TOTP 密钥的两步验证、只能通过鉴权端点访问的私有媒体文件
 
 ## 快速开始
 
+最快的体验方式：
+
+```sh
+git clone https://github.com/<你的账号>/php-private-messenger.git
+cd php-private-messenger
+docker compose up --build        # 然后打开 http://127.0.0.1:8088
+```
+
+这会启动 nginx、PHP-FPM 和 MySQL，自动执行 `schema.sql` 与全部迁移，并使用与真实部署
+相同的规则对外提供服务，因此你在本地验证到的攻击面与线上一致。它是**开发用**环境：数据库
+密码是公开写死的，没有 TLS，并且由于没有接入病毒扫描，上传会被直接拒绝。
+详见 [`compose.yaml`](compose.yaml)。
+
+### 手动安装
+
 ```sh
 git clone https://github.com/<你的账号>/php-private-messenger.git
 cd php-private-messenger

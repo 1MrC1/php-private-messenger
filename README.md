@@ -63,6 +63,22 @@ i18n test will tell you.
 
 ## Quick start
 
+The fastest way to try it:
+
+```sh
+git clone https://github.com/<you>/php-private-messenger.git
+cd php-private-messenger
+docker compose up --build        # then open http://127.0.0.1:8088
+```
+
+That brings up nginx, PHP-FPM and MySQL, applies `schema.sql` and every
+migration, and serves the app through the same rules a real deployment uses, so
+what you exercise locally has the same exposure surface. It is a **development**
+stack: the database password is a published string, there is no TLS, and uploads
+are refused because no malware scanner is attached. See [`compose.yaml`](compose.yaml).
+
+### Installing it yourself
+
 ```sh
 git clone https://github.com/<you>/php-private-messenger.git
 cd php-private-messenger

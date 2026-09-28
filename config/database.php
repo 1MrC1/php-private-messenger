@@ -27,6 +27,20 @@ class Database
         return $value;
     }
 
+    /** An optional runtime value, held to the same hygiene as a required one. */
+    public static function optionalEnvironmentValue(string $name): ?string
+    {
+        $value = getenv($name);
+        if (!is_string($value) || $value === '') {
+            return null;
+        }
+        if (strlen($value) > 255 || str_contains($value, "\0") ||
+            str_contains($value, "\r") || str_contains($value, "\n")) {
+            throw new RuntimeException('Runtime security configuration is unavailable');
+        }
+        return $value;
+    }
+
     public static function backupCodePepper(): string
     {
         return self::requiredEnvironmentValue('PM_BACKUP_CODE_PEPPER', 32);
@@ -92,7 +106,11 @@ define('UPLOAD_MAX_SIZE', 50 * 1024 * 1024); // 50MB
 define('ALLOWED_FILE_TYPES', ['image/jpeg', 'image/png', 'image/gif', 'application/pdf', 'text/plain']);
 
 // Site configurations
-define('SITE_URL', 'https://messenger.example');
+// The origin the API compares against when refusing cross-origin state
+// changes. It must match how users actually reach the site, so it comes from
+// the environment like everything else; the default keeps existing deployments
+// working unchanged.
+define('SITE_URL', Database::optionalEnvironmentValue('PM_SITE_URL') ?? 'https://messenger.example');
 define('UPLOAD_DIR', 'uploads/');
 define('AVATAR_DIR', 'uploads/avatars/');
 define('FILES_DIR', 'uploads/files/');
