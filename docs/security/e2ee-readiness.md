@@ -246,13 +246,24 @@ Two related facts for whoever implements the protocol:
 
 ## Safe rollout gates
 
-1. Write and review the threat model, device lifecycle, recovery design, and
-   abuse-handling policy.
-2. Select and pin an actively maintained MLS implementation with browser/WASM
-   support; validate official vectors and fuzz envelope parsing.
-3. Add versioned schema alongside the existing plaintext schema. No destructive
-   conversion and no automatic downgrade.
-4. Ship opt-in test conversations with conspicuous verification and backup UX.
-5. Commission an independent protocol and implementation audit.
+1. ~~Write and review the threat model, device lifecycle, recovery design, and
+   abuse-handling policy.~~ Written: `threat-model.md`. "Reviewed" belongs to
+   gate 5.
+2. ~~Select and pin an actively maintained MLS implementation with browser/WASM
+   support; validate official vectors and fuzz envelope parsing.~~ OpenMLS 0.9.0,
+   pinned exactly and by checksum; 16 known-answer suites plus the reachable ones
+   (`rfc9420-vectors.md`); envelopes and commits fuzzed.
+3. ~~Add versioned schema alongside the existing plaintext schema. No destructive
+   conversion and no automatic downgrade.~~ Done: `envelope_version`, protection
+   chosen at creation and irreversible, plaintext and envelopes refused in each
+   other's conversations.
+4. ~~Ship opt-in test conversations with conspicuous verification and backup
+   UX.~~ Done: opt-in at creation, an unaudited-encryption banner, a safety
+   number to compare, a recovery file.
+5. **Commission an independent protocol and implementation audit.** Open, and the
+   only gate left. `review-scope.md` is the brief: what to review, what tests
+   already cover, and the claims worth attacking.
 6. Only after all supported clients pass interoperability, recovery, removal,
-   replay, reordering, and rollback tests may the product claim E2EE.
+   replay, reordering, and rollback tests may the product claim E2EE. The tests
+   pass across Chromium, Firefox and WebKit (`browser-interop.md`); the claim
+   still waits on gate 5.

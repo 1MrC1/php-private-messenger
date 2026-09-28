@@ -24,6 +24,21 @@ attachments. This is a deliberate, documented design position, not an oversight
 that "the server can read messages" will be closed as by-design; reports that a
 *deployment* claims E2EE are a documentation bug worth raising.
 
+## Protected conversations are experimental and unaudited
+
+There is an opt-in encrypted path, off unless `PM_PROTECTED_CHATS_ENABLED=1`. It
+wraps OpenMLS (RFC 9420) compiled to WebAssembly. It has **not** had an
+independent cryptographic review, the interface says so in all five languages, and
+nothing in the project may call it end-to-end encrypted until the gate in
+[docs/security/e2ee-readiness.md](docs/security/e2ee-readiness.md) is closed.
+
+Findings against that path are extremely welcome — it is the part most in need of
+outside eyes. [docs/security/review-scope.md](docs/security/review-scope.md) says
+what to look at, what is already covered by tests, and which claims are worth
+attacking; [docs/security/threat-model.md](docs/security/threat-model.md) states
+what is and is not being defended against, including that cross-site scripting in
+the origin defeats browser-held keys entirely.
+
 Delivery metadata (who talked to whom, and when) is stored in plain form and is
 visible to whoever runs the server.
 

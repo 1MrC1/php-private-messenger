@@ -24,6 +24,16 @@ inline handlers and `eval`. Every one of those properties has a regression test.
 > [docs/security/e2ee-readiness.md](docs/security/e2ee-readiness.md) for the
 > design that would be required, and do not describe a deployment of this code
 > as E2EE.
+>
+> There is an **opt-in, experimental, unaudited** encrypted path (off unless
+> `PM_PROTECTED_CHATS_ENABLED=1`) wrapping OpenMLS. Six of the seven gates in that
+> document are now closed — RFC 9420 known-answer suites, cross-engine interop,
+> fuzzing, safety numbers, recovery, device removal. The seventh is an
+> **independent cryptographic review**, which cannot be done from inside the
+> repository. If you do that kind of work,
+> [docs/security/review-scope.md](docs/security/review-scope.md) is the brief and
+> [docs/security/threat-model.md](docs/security/threat-model.md) is what it
+> assumes. Until that gate closes, nothing here is called end-to-end encrypted.
 
 ## Screenshots
 

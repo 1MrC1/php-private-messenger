@@ -19,6 +19,13 @@ TOTP 密钥的两步验证、只能通过鉴权端点访问的私有媒体文件
 > 若要了解实现端到端加密所需的设计，请阅读
 > [docs/security/e2ee-readiness.md](docs/security/e2ee-readiness.md)；请勿把基于本代码的
 > 部署描述为"端到端加密"。
+>
+> 另有一条**可选、实验性、未经审计**的加密通道（除非设置 `PM_PROTECTED_CHATS_ENABLED=1`
+> 否则关闭），基于 OpenMLS。该文档列出的七道关卡已关闭六道：RFC 9420 已知答案向量、跨引擎
+> 互操作、模糊测试、安全码、恢复文件、设备移除。第七道是**独立密码学审计**，无法在仓库内部
+> 完成。如果你做这类工作，[docs/security/review-scope.md](docs/security/review-scope.md)
+> 是审计说明，[docs/security/threat-model.md](docs/security/threat-model.md) 是它的前提
+> 假设。在那道关卡关闭之前，这里的任何东西都不会被称为端到端加密。
 
 ## 界面截图
 
