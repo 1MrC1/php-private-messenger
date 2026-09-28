@@ -183,10 +183,22 @@ No PHPUnit and no Jest; tests are plain scripts that print `PASS:` lines and exi
 non-zero on failure.
 
 ```sh
-for t in tests/*_test.php; do php "$t"; done          # 21 PHP suites
-for t in tests/*_runtime_test.js; do node "$t"; done   # 2 client suites
+for t in tests/*_test.php; do php "$t"; done           # 25 PHP suites
+for t in tests/*_runtime_test.js; do node "$t"; done   # 6 client suites
 php tests/i18n_catalog_test.php                        # a single suite
 ```
+
+The encryption layer has one more suite, which needs a Rust toolchain and is not
+required to run or contribute to the application. It runs the MLS working group's
+own RFC 9420 known-answer tests:
+
+```sh
+cd crypto && cargo test --test rfc9420_vectors -- --nocapture
+```
+
+The vectors are pinned by digest and `tests/crypto_artifact_test.php` checks
+those digests without any toolchain, so vectors edited to make a failing build
+pass fail the ordinary suite instead.
 
 Lint the way the workflows do:
 

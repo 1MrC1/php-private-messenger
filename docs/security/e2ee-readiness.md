@@ -137,8 +137,23 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    `tests/mls_session_runtime_test.js` requires that a removed device cannot
    read what is sent after its removal.
 
+10. **Conformance against the published answers**: the MLS working group's own
+   RFC 9420 known-answer tests run in `crypto/tests/rfc9420_vectors.rs` — tree
+   math and the key schedule through OpenMLS's own runners, `crypto-basics`
+   through the provider this project compiles in. The vectors are pinned by
+   digest and `tests/crypto_artifact_test.php` verifies those digests with no
+   Rust toolchain, because vectors that can be edited to match a failing build
+   prove nothing. Each of the three suites was checked to fail on a single
+   flipped digit before being trusted.
+
+   The limit is worth stating plainly: the suites that would demonstrate
+   *protocol* conformance — message protection, welcome, treekem, transcript,
+   secret tree, PSK secret, passive client — need OpenMLS internals that a
+   dependent crate cannot reach, so they do not run. What runs covers the
+   primitives, the label encodings and the epoch key schedule.
+
    What remains is the one thing that cannot be written here: the independent
-   review of this integration (#7), the RFC 9420 official test vectors, and a
+   review of this integration (#7), the protocol-level vectors above, and a
    browser interoperability matrix. Until those land the wording stays as it is
    — "experimental", "unaudited", and never "end-to-end encrypted".
 

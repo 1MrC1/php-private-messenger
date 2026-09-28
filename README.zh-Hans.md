@@ -157,10 +157,20 @@ tests/*.php|js      纯脚本；不用 PHPUnit，也不用 Jest
 不使用 PHPUnit，也不使用 Jest；测试就是普通脚本，输出 `PASS:` 行，失败时以非零状态退出。
 
 ```sh
-for t in tests/*_test.php; do php "$t"; done            # 21 个 PHP 测试套件
-for t in tests/*_runtime_test.js; do node "$t"; done     # 2 个前端测试套件
+for t in tests/*_test.php; do php "$t"; done            # 25 个 PHP 测试套件
+for t in tests/*_runtime_test.js; do node "$t"; done     # 6 个前端测试套件
 php tests/i18n_catalog_test.php                          # 单独运行某一个
 ```
+
+加密层还有一个测试套件，需要 Rust 工具链；运行本应用或参与贡献都不需要它。它跑的是 MLS
+工作组自己发布的 RFC 9420 已知答案测试向量：
+
+```sh
+cd crypto && cargo test --test rfc9420_vectors -- --nocapture
+```
+
+这些向量按摘要固定。`tests/crypto_artifact_test.php` 在不需要任何工具链的情况下校验这些
+摘要，所以若有人改动向量去迁就一个本该失败的构建，普通测试套件就会先失败。
 
 按工作流同样的方式做静态检查：
 

@@ -33,3 +33,10 @@ getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 opt-level = "s"
 lto = true
 panic = "abort"
+
+[dev-dependencies]
+# `test-utils` unlocks OpenMLS's own known-answer-test runners (key schedule,
+# tree math) and its testing prelude. It is a dev-dependency on purpose: the
+# shipped WebAssembly is built without it, and `crypto/BUILDING.md` records the
+# checksum proof of that.
+openmls = { version = "=0.9.0", features = ["js", "test-utils"] }

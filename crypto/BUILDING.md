@@ -37,6 +37,39 @@ cd ../assets/vendor/mls && sha256sum pm_mls.js pm_mls_bg.wasm > ARTIFACTS.sha256
 run, so an artifact swapped in a pull request fails the build without anyone
 needing a Rust toolchain.
 
+The build is byte-identical when repeated on the same toolchain: rebuilding after
+adding the `test-utils` development dependency produced exactly the committed
+`pm_mls.js` and `pm_mls_bg.wasm`. That is also the evidence that the shipped
+artifact is **not** built with `test-utils` — a development dependency does not
+reach a release build, and `tests/crypto_artifact_test.php` fails if that feature
+ever appears outside `[dev-dependencies]`.
+
+## Known-answer tests (RFC 9420)
+
+`cargo test` above includes them; to see what ran:
+
+```sh
+cargo test --test rfc9420_vectors -- --nocapture
+```
+
+The vectors in `test-vectors/` are the MLS working group's own, pinned by digest,
+with their upstream commit recorded in `test-vectors/PROVENANCE.md`. Three suites
+run: tree math and the key schedule through **OpenMLS's own KAT runners**, and
+`crypto-basics` through the provider this crate uses, with the `KDFLabel` and
+`EncryptContext` encodings written out from the RFC because OpenMLS keeps its own
+copies `pub(crate)`.
+
+The key schedule is the one that reaches deepest: it drives the library's real
+epoch derivation across every epoch in the vector — joiner, welcome, sender-data,
+encryption, exporter, authenticator, external, confirmation, membership and
+resumption secrets — and compares each against the published answer.
+
+What does **not** run: message protection, welcome, treekem, transcript, secret
+tree, PSK secret and the passive-client suites, all of which need OpenMLS
+internals a dependent crate cannot reach. So this is conformance of the primitive
+and key-schedule layers, not of the protocol, and it is not a substitute for the
+independent review described in `docs/security/e2ee-readiness.md`.
+
 ## Verifying the committed artifacts
 
 Build from a clean checkout and compare:

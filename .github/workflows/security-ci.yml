@@ -103,3 +103,22 @@ jobs:
         uses: docker://ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
         with:
           args: dir /github/workspace --redact --no-banner --verbose
+
+  vectors:
+    name: RFC 9420 known-answer tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      # The application needs no Rust toolchain, and neither does verifying the
+      # committed artifacts' digests. This job exists so the vectors themselves
+      # can be run by anyone, on a clean machine, without taking our word for it.
+      - name: Install the pinned Rust toolchain
+        shell: bash
+        run: rustup show && rustc --version && cargo --version
+
+      - name: Run the MLS working group's vectors
+        shell: bash
+        working-directory: crypto
+        run: cargo test --test rfc9420_vectors -- --nocapture
