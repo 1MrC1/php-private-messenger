@@ -19,10 +19,13 @@ use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::OpenMlsRustCrypto;
 use wasm_bindgen::prelude::*;
 
+mod session;
+pub use session::MlsSession;
+
 /// The one cipher suite this build supports. Pinned rather than negotiated:
 /// a downgrade dance is a place bugs hide, and one suite is enough until there
 /// is a reason for a second.
-const CIPHERSUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+pub(crate) const CIPHERSUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
 #[wasm_bindgen]
 pub fn version() -> String {

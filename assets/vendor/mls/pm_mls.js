@@ -1,6 +1,207 @@
 /* @ts-self-types="./pm_mls.d.ts" */
 
 /**
+ * One device's MLS state: its identity and every group it belongs to.
+ */
+export class MlsSession {
+    static __wrap(ptr) {
+        const obj = Object.create(MlsSession.prototype);
+        obj.__wbg_ptr = ptr;
+        MlsSessionFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        MlsSessionFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_mlssession_free(ptr, 0);
+    }
+    /**
+     * Add a member using a key package claimed from the server. Returns the
+     * commit and welcome, both of which travel through the server as opaque
+     * bytes, plus the ratchet tree the joiner needs.
+     * @param {Uint8Array} group_id
+     * @param {Uint8Array} key_package
+     * @returns {any}
+     */
+    add_member(group_id, key_package) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(key_package, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_add_member(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * Start a new group. Returns its identifier.
+     * @returns {Uint8Array}
+     */
+    create_group() {
+        const ret = wasm.mlssession_create_group(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Generate this device's signing identity. Returns its public key, which
+     * the server stores and other devices verify against.
+     * @param {string} identity
+     * @returns {Uint8Array}
+     */
+    create_identity(identity) {
+        const ptr0 = passStringToWasm0(identity, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_create_identity(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * Publish-ready key package. The server hands each one out exactly once.
+     * @returns {Uint8Array}
+     */
+    create_key_package() {
+        const ret = wasm.mlssession_create_key_package(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * The whole session as bytes. Contains private keys: wrap before storing.
+     * @returns {Uint8Array}
+     */
+    export_state() {
+        const ret = wasm.mlssession_export_state(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Join a group from a welcome delivered by the server.
+     * @param {Uint8Array} welcome
+     * @param {Uint8Array} ratchet_tree
+     * @returns {Uint8Array}
+     */
+    join_group(welcome, ratchet_tree) {
+        const ptr0 = passArray8ToWasm0(welcome, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(ratchet_tree, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_join_group(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
+     * A session with no identity yet. Call `create_identity` next.
+     */
+    constructor() {
+        const ret = wasm.mlssession_new();
+        this.__wbg_ptr = ret;
+        MlsSessionFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Open a message, or apply a commit. Returns the plaintext for an
+     * application message and an empty vector for group state changes.
+     * @param {Uint8Array} group_id
+     * @param {Uint8Array} sealed
+     * @returns {Uint8Array}
+     */
+    open(group_id, sealed) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(sealed, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_open(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
+     * The ratchet tree for a group, which a joiner needs alongside a welcome.
+     * @param {Uint8Array} group_id
+     * @returns {Uint8Array}
+     */
+    ratchet_tree(group_id) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_ratchet_tree(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * Rebuild a session from previously exported bytes.
+     * @param {Uint8Array} state
+     * @param {Uint8Array} signature_public_key
+     * @param {Uint8Array} identity
+     * @returns {MlsSession}
+     */
+    static restore(state, signature_public_key, identity) {
+        const ptr0 = passArray8ToWasm0(state, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(signature_public_key, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray8ToWasm0(identity, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_restore(ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return MlsSession.__wrap(ret[0]);
+    }
+    /**
+     * Seal an application message. The bytes are what the server stores.
+     * @param {Uint8Array} group_id
+     * @param {Uint8Array} plaintext
+     * @returns {Uint8Array}
+     */
+    seal(group_id, plaintext) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(plaintext, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_seal(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+}
+if (Symbol.dispose) MlsSession.prototype[Symbol.dispose] = MlsSession.prototype.free;
+
+/**
  * The cipher suite identifier, so the caller can record what sealed a message.
  * @returns {number}
  */
@@ -102,6 +303,14 @@ function __wbg_get_imports() {
             const ret = arg0.msCrypto;
             return ret;
         },
+        __wbg_new_617a8cdb8bb1130e: function() {
+            const ret = new Object();
+            return ret;
+        },
+        __wbg_new_from_slice_9a868026ffa4208a: function(arg0, arg1) {
+            const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
+            return ret;
+        },
         __wbg_new_with_length_3da0ad195f6f63ba: function(arg0) {
             const ret = new Uint8Array(arg0 >>> 0);
             return ret;
@@ -126,6 +335,10 @@ function __wbg_get_imports() {
         }, arguments); },
         __wbg_require_b4edbdcf3e2a1ef0: function() { return handleError(function () {
             const ret = module.require;
+            return ret;
+        }, arguments); },
+        __wbg_set_145a351398b48c65: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = Reflect.set(arg0, arg1, arg2);
             return ret;
         }, arguments); },
         __wbg_static_accessor_GLOBAL_266715b9d96ba635: function() {
@@ -178,6 +391,10 @@ function __wbg_get_imports() {
     };
 }
 
+const MlsSessionFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_mlssession_free(ptr, 1));
+
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();
     wasm.__wbindgen_externrefs.set(idx, obj);
@@ -212,6 +429,13 @@ function handleError(f, args) {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {

@@ -69,6 +69,24 @@ is strong evidence of its absence. Record the toolchain you used:
   it the module cannot instantiate. It permits WebAssembly only; it does not
   restore `eval()` or inline script.
 
+## The session API
+
+`MlsSession` is the stateful half: `create_identity`, `create_key_package`,
+`create_group`, `add_member`, `join_group`, `seal`, `open`, and
+`export_state` / `restore` so state survives a page reload.
+
+`export_state()` returns private key material. Wrap it with a non-extractable
+key before it touches storage, and be clear about what that buys: at rest it is
+inert without the wrapping key, but while the tab is open the material is in
+WebAssembly memory where a cross-site scripting bug can reach it.
+
+OpenMLS's own serialiser for `MemoryStorage` is behind its `test-utils` feature
+and documented as being for known-answer tests, so this crate frames the public
+`values` map itself rather than depending on a test-only API.
+
+`tests/mls_session_runtime_test.js` runs the whole flow against the committed
+artifacts on every test run.
+
 ## What still does not exist
 
 Everything a messenger needs around the engine: persistent group state, device
