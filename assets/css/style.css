@@ -7574,3 +7574,20 @@ html[dir="rtl"] .settings-overview-card:hover > .fa-arrow-right {
     vertical-align: middle;
     flex: 0 0 auto;
 }
+
+/* Shown while a protected conversation is open. Deliberately plain and
+   persistent: this is a caveat, not a feature badge. */
+.protected-banner {
+    margin: 0;
+    padding: 10px 16px;
+    background: var(--surface-soft);
+    border-bottom: 1px solid var(--line-strong);
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+
+.protected-banner strong {
+    color: var(--text-primary);
+    margin-inline-end: 8px;
+}

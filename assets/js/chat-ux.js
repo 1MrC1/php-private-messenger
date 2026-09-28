@@ -166,6 +166,22 @@
         if (element && element.textContent !== value) element.textContent = value;
     }
 
+    /**
+     * Keep the protected-conversation caveat in step with the open chat. Driven
+     * from the row the server marked, so a client cannot show a stronger claim
+     * than the server supports.
+     */
+    function refreshProtectedBanner() {
+        const banner = document.getElementById('protectedBanner');
+        if (!banner) return;
+        const chatId = activeChatId();
+        const row = chatId
+            ? document.querySelector('.chat-item[data-chat-id="' + chatId + '"]')
+            : null;
+        const isProtected = !!row && row.dataset.protected === 'true';
+        banner.classList.toggle('d-none', !isProtected);
+    }
+
     function decorateConversationRows() {
         loadPreferences();
         const list = document.getElementById('chatList');
@@ -336,6 +352,7 @@
         savePreferences();
         if (uxState.rowMenuChatId) closeChatRowMenu(true);
         decorateConversationRows();
+        refreshProtectedBanner();
         toast((kind === 'pin' ? (enabled ? 'Conversation pinned' : 'Conversation unpinned') :
             (enabled ? 'Conversation de-emphasized' : 'Conversation prominence restored')) + ' on this device', 'success');
     }
@@ -1401,6 +1418,7 @@
     window.renderChats = function renderChatsWithTelegramStates() {
         const result = legacyRenderChats.apply(this, arguments);
         decorateConversationRows();
+        refreshProtectedBanner();
         return result;
     };
 
@@ -1429,6 +1447,7 @@
         const result = legacySelectChat.apply(this, arguments);
         window.setTimeout(function () {
             decorateConversationRows();
+        refreshProtectedBanner();
             decorateMessageTimeline();
             syncComposerControls();
         }, 0);
@@ -1491,6 +1510,7 @@
             uxState.delivery.delete(chatId);
         }
         decorateConversationRows();
+        refreshProtectedBanner();
         syncComposerControls();
     });
 
@@ -1599,6 +1619,7 @@
     if (input) {
         input.addEventListener('input', function () {
             decorateConversationRows();
+        refreshProtectedBanner();
             syncComposerControls();
         });
     }
@@ -1677,6 +1698,7 @@
     window.addEventListener('pm:attachment-state-change', syncComposerControls);
     window.refreshLocalizedChatUx = function refreshLocalizedChatUx() {
         decorateConversationRows();
+        refreshProtectedBanner();
         decorateMessageTimeline();
         updateSelectedChatPreferenceLabels();
         const searchView = document.getElementById('chatSidePanelSearchView');
