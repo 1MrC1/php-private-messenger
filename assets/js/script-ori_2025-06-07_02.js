@@ -121,8 +121,19 @@
     };
 
 
-    // Initialize app
-    $(document).ready(function () {
+    // Initialize app. Native equivalent of the jQuery ready() this used to
+    // call: if the document has already finished parsing -- which it has, since
+    // this script is loaded at the end of the body -- run immediately rather
+    // than waiting for an event that has already fired.
+    function whenDocumentReady(start) {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', start, {once: true});
+        } else {
+            start();
+        }
+    }
+
+    whenDocumentReady(function () {
         if (window.pmSecurityHardeningReady !== true) {
             console.error('Required security hardening did not initialize; application startup was blocked.');
             document.documentElement.setAttribute('data-pm-security-blocked', 'true');

@@ -90,7 +90,6 @@ $vendored = [
     'assets/vendor/css/bootstrap.min.css',
     'assets/vendor/css/fontawesome.min.css',
     'assets/vendor/js/bootstrap.bundle.min.js',
-    'assets/vendor/js/jquery.min.js',
 ];
 foreach ($vendored as $path) {
     cspAssert(is_file($root . '/' . $path), 'vendored asset is present: ' . $path);

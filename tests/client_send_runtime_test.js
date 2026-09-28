@@ -188,12 +188,7 @@ function createBrowserContext() {
     context.window = context;
     context.location = {origin: 'https://messenger.example'};
     context.innerWidth = 1024;
-    context.$ = function () {
-        return {
-            ready() {},
-            modal() {}
-        };
-    };
+    // No jQuery stub: the application no longer depends on it.
     context.__elements = elements;
     context.__messageInput = messageInput;
     context.__sendButton = sendButton;
