@@ -89,9 +89,20 @@ artifacts on every test run.
 
 ## What still does not exist
 
-Everything a messenger needs around the engine: persistent group state, device
-identity and enrollment, key packages published to the server, verification,
-recovery, and attachments. `self_test()` proves the engine works in a browser.
-It does not make the application end-to-end encrypted, and until the work in
-`docs/security/e2ee-readiness.md` is done and independently reviewed, nothing
-should say otherwise.
+The engine works and the server can store what it produces. What is missing is
+the wiring between them:
+
+- the browser code that enrolls a device, publishes key packages, claims them,
+  and drives a conversation through `api/chat.php`
+- key material held in IndexedDB under a non-extractable wrapping key
+- any interface: no way to start a protected conversation, no lock, no warning
+- safety numbers, so a substituted key can be noticed by a person
+- key recovery, so losing every device does not silently lose all history
+- attachments, which need their own encryption and lose server-side malware
+  scanning
+- the independent review of **this integration**, which OpenMLS's audit does not
+  cover
+
+None of this makes the application end-to-end encrypted today, and until the
+work in `docs/security/e2ee-readiness.md` is done and independently reviewed,
+nothing should say otherwise.
