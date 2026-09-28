@@ -4,6 +4,7 @@ require_once __DIR__ . '/../classes/Auth.php';
 require_once __DIR__ . '/../classes/I18n.php';
 require_once __DIR__ . '/../classes/Chat.php';
 require_once __DIR__ . '/../classes/ProtectedChat.php';
+require_once __DIR__ . '/../classes/DeviceDirectory.php';
 
 Auth::configureSession();
 Auth::setPrivateResponseHeaders();
@@ -635,6 +636,64 @@ try {
             $emoji = requireApiString($input['emoji'], 'Reaction', 1, 32);
             $result = $chat->addReaction($messageId, $currentUser['id'], $emoji);
             $response = $result;
+            break;
+
+        case 'list_devices':
+        case 'claim_key_packages':
+        case 'get_directory_log':
+            // Device identity and key transport. Everything exchanged here is
+            // public by design in MLS; no private key reaches the server.
+            // Enrollment and revocation are NOT here: they change account
+            // security state, so they live in api/settings.php behind a fresh
+            // password and second factor.
+            if (!(new ProtectedChat())->supportsProtectedChats()) {
+                $response = [
+                    'success' => false,
+                    'message' => 'The request could not be completed',
+                    'error_code' => 'protected_chats_unavailable',
+                    'http_status' => 503,
+                ];
+                break;
+            }
+            $directory = new DeviceDirectory();
+            try {
+                switch ($input['action']) {
+                    case 'list_devices':
+                        $response = [
+                            'success' => true,
+                            'devices' => $directory->devicesFor((int)$currentUser['id']),
+                        ];
+                        break;
+
+                    case 'claim_key_packages':
+                        $targetUserId = requirePositiveApiId($input['user_id'] ?? null, 'User ID');
+                        $response = [
+                            'success' => true,
+                            'key_packages' => $directory->claimKeyPackages(
+                                (int)$currentUser['id'],
+                                $targetUserId
+                            ),
+                        ];
+                        break;
+
+                    default:
+                        $response = [
+                            'success' => true,
+                            'entries' => $directory->directoryAfter(
+                                (int)($input['after_seq'] ?? 0),
+                                (int)($input['limit'] ?? 200)
+                            ),
+                        ];
+                        break;
+                }
+            } catch (ProtectedChatMismatch $mismatch) {
+                $response = [
+                    'success' => false,
+                    'message' => 'The request is invalid',
+                    'error_code' => $mismatch->errorCode(),
+                    'http_status' => 409,
+                ];
+            }
             break;
 
         case 'protect_chat':

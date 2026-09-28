@@ -77,8 +77,23 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    domain computed over ciphertext, so it stops being an offline oracle for
    guessed plaintext.
 
-   Still missing, and all of it required: the client, the key management, device
-   identity, verification, recovery, attachments, and the audit.
+3. **The MLS engine**: `crypto/` wraps OpenMLS 0.9.0 and is compiled to
+   WebAssembly, committed with checksums. `self_test()` performs a full
+   two-party exchange — identities, key package, group, welcome, seal, open —
+   and it passes in a browser. The engine works; the messenger around it does
+   not exist yet.
+
+4. **Device identity and key transport**: `classes/DeviceDirectory.php` with
+   three more tables. Devices, not accounts, are MLS members. Key packages are
+   consumed exactly once under a lock, a revoked device stops being offered and
+   loses its unclaimed packages, and every change is appended to a hash chain a
+   client can verify. That chain detects a server that later rewrites history;
+   it is not key transparency, and it does not catch a server that lies
+   consistently to a client which has never seen the truth.
+
+   Still missing, and all of it required: the browser client that ties these
+   together, persistent group state, enrollment wired to a fresh credential
+   proof, safety-number verification, key recovery, attachments, and the audit.
 
 ## Prerequisite: nothing else may serve script into this origin
 
