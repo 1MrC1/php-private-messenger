@@ -308,7 +308,7 @@
                 });
                 try { return await response.json(); } catch (error) { return null; }
             },
-            clientFactory: () => window.PmProtected.browserClient(),
+            clientFactory: () => window.PmProtected.browserClient(window.currentUserId || null),
             prompt: browserPrompt,
             notify: (message) => { if (typeof window.showToast === 'function') window.showToast(message, 'error'); },
             translate: (key, fallback) => (window.HiI18n && typeof window.HiI18n.t === 'function'

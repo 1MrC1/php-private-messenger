@@ -504,8 +504,23 @@ impl MlsSession {
         }
         keys.sort();
 
+        // The conversation's own secret, not only who is in it.
+        //
+        // A review found the first version comparing membership alone, so two
+        // separately keyed groups with the same people produced the same number
+        // — and a welcome cross-routed between them was invisible in it. The
+        // exporter secret is specific to this group and this epoch, so it binds
+        // both. Every member derives the same value; nobody outside can.
+        let exporter = group
+            .export_secret(self.provider.crypto(), "pm-safety-number", group_id, 32)
+            .map_err(|error| JsValue::from_str(&format!("deriving the safety number failed: {error:?}")))?;
+
         let mut hasher = Sha256::new();
-        hasher.update(b"pm-safety-number-v1");
+        hasher.update(b"pm-safety-number-v2");
+        hasher.update((group_id.len() as u32).to_be_bytes());
+        hasher.update(group_id);
+        hasher.update((exporter.len() as u32).to_be_bytes());
+        hasher.update(&exporter);
         for key in &keys {
             hasher.update((key.len() as u32).to_be_bytes());
             hasher.update(key);

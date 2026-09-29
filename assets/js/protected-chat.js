@@ -32,6 +32,19 @@
      * MLS module.
      */
     function createProtectedClient(adapters) {
+        // Which account this device state belongs to.
+        //
+        // A review switched accounts in one browser and watched the second
+        // account resume the first one's signer, because the store used one
+        // fixed key per origin. The account is now part of every identifier and
+        // is sealed inside the record, so a mismatch cannot silently pass.
+        const accountId = adapters.accountId === undefined || adapters.accountId === null
+            ? null
+            : String(adapters.accountId);
+        const scope = accountId === null ? '' : ':' + accountId;
+        const wrapKeyId = WRAP_KEY_ID + scope;
+        const stateId = STATE_ID + scope;
+
         const storage = adapters.storage;
         const subtle = adapters.crypto.subtle;
         const randomBytes = adapters.randomBytes;
@@ -48,7 +61,7 @@
         // ---- local key storage ---------------------------------------------
 
         async function wrappingKey() {
-            const existing = await storage.get(WRAP_KEY_ID);
+            const existing = await storage.get(wrapKeyId);
             if (existing) {
                 return existing;
             }
@@ -59,7 +72,7 @@
                 'encrypt',
                 'decrypt',
             ]);
-            await storage.put(WRAP_KEY_ID, key);
+            await storage.put(wrapKeyId, key);
             return key;
         }
 
@@ -70,17 +83,24 @@
             const key = await wrappingKey();
             const iv = randomBytes(12);
             const sealed = await subtle.encrypt({ name: 'AES-GCM', iv }, key, session.export_state());
-            await storage.put(STATE_ID, {
+            await storage.put(stateId, {
                 iv,
                 sealed: new Uint8Array(sealed),
                 identity,
                 signaturePublicKey,
+                accountId,
             });
         }
 
         async function loadSession() {
-            const record = await storage.get(STATE_ID);
+            const record = await storage.get(stateId);
             if (!record) {
+                return null;
+            }
+            // Belt as well as braces: the key is scoped, and the record says
+            // whose it is. Refusing here means an account switch cannot inherit
+            // another account's device, even if the store were keyed wrongly.
+            if ((record.accountId ?? null) !== accountId) {
                 return null;
             }
             const key = await wrappingKey();
@@ -168,6 +188,7 @@
             const claim = await post('api/chat.php', {
                 action: 'claim_key_packages',
                 user_id: otherUserId,
+                chat_id: chatId,
             });
             if (!claim || claim.success !== true) {
                 throw new Error((claim && claim.message) || 'Could not claim key packages');
@@ -207,6 +228,7 @@
             const claim = await post('api/chat.php', {
                 action: 'claim_key_packages',
                 user_id: otherUserId,
+                chat_id: chatId,
             });
             if (!claim || claim.success !== true) {
                 throw new Error((claim && claim.message) || 'Could not claim key packages');
@@ -900,10 +922,13 @@
         };
     }
 
-    async function browserClient() {
+    async function browserClient(accountId) {
         const mls = await import('../vendor/mls/pm_mls.js');
         await mls.default();
         return createProtectedClient({
+            // Whose device this is. Without it, two accounts sharing a browser
+            // share a signer.
+            accountId: accountId === undefined ? (window.currentUserId || null) : accountId,
             storage: indexedDbStorage(),
             crypto: window.crypto,
             randomBytes: (length) => window.crypto.getRandomValues(new Uint8Array(length)),

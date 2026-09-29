@@ -245,8 +245,24 @@ final class DeviceDirectory
      *
      * @return list<array<string, mixed>>
      */
-    public function claimKeyPackages(int $claimingUserId, int $targetUserId): array
-    {
+    public function claimKeyPackages(
+        int $claimingUserId,
+        int $targetUserId,
+        int $chatId,
+        ProtectedChat $chats
+    ): array {
+        // Both sides must be in the conversation the claim is for. Without this
+        // any authenticated account could spend another account's one-time key
+        // packages until it had none left and could no longer be added to a
+        // protected conversation at all.
+        if (!$chats->isParticipant($chatId, $claimingUserId) ||
+            !$chats->isParticipant($chatId, $targetUserId)) {
+            throw new ProtectedChatMismatch(
+                'Key packages can only be claimed for a conversation you are both in',
+                'not_a_participant'
+            );
+        }
+
         $devices = $this->select(
             'SELECT id, public_id, signature_public_key
                FROM e2ee_devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY id',

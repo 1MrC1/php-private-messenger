@@ -130,6 +130,30 @@ const decoder = new TextDecoder();
         'an implausible entry count is refused');
     console.log('PASS: the state format refuses trailing bytes, a foreign header, truncation and absurd lengths');
 
+    // ---- the safety number binds the conversation, not just the members ----
+    // The review's scenario: two separately keyed groups accepted by the same
+    // two devices used to display the same number, so a welcome cross-routed
+    // between them was invisible.
+
+    const e = session('e@example');
+    const f = session('f@example');
+
+    const firstGroup = e.create_group();
+    const joinFirst = e.add_member(firstGroup, f.create_key_package());
+    const fFirst = f.join_group(joinFirst.welcome, joinFirst.ratchet_tree);
+
+    const secondGroup = e.create_group();
+    const joinSecond = e.add_member(secondGroup, f.create_key_package());
+    const fSecond = f.join_group(joinSecond.welcome, joinSecond.ratchet_tree);
+
+    assert.equal(e.safety_number(firstGroup), f.safety_number(fFirst),
+        'both devices see the same number for one conversation');
+    assert.notEqual(e.safety_number(firstGroup), e.safety_number(secondGroup),
+        'two conversations with identical membership have different numbers');
+    assert.notEqual(f.safety_number(fFirst), f.safety_number(fSecond),
+        'and the other device sees them as different too');
+    console.log('PASS: the safety number distinguishes two groups with the same members');
+
     console.log('MLS fork and state-format tests passed.');
 })().catch((error) => {
     console.error(error);

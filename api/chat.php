@@ -669,11 +669,18 @@ try {
 
                     case 'claim_key_packages':
                         $targetUserId = requirePositiveApiId($input['user_id'] ?? null, 'User ID');
+                        // A claim permanently consumes a one-time key package, so
+                        // anyone able to call this for any account could exhaust
+                        // it and deny them protected conversations. It now has to
+                        // be for a conversation both are in.
+                        $claimChatId = requirePositiveApiId($input['chat_id'] ?? null, 'Chat ID');
                         $response = [
                             'success' => true,
                             'key_packages' => $directory->claimKeyPackages(
                                 (int)$currentUser['id'],
-                                $targetUserId
+                                $targetUserId,
+                                $claimChatId,
+                                new ProtectedChat()
                             ),
                         ];
                         break;

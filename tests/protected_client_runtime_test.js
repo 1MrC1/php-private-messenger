@@ -59,6 +59,12 @@ function fakeServer() {
                 return { success: true, device_id: device.deviceId, key_packages_stored: device.keyPackages.length };
             }
             case 'claim_key_packages': {
+                // The real endpoint refuses a claim that is not for a
+                // conversation both accounts are in; the double insists on being
+                // told which conversation, so a caller that forgets is caught.
+                if (!body.chat_id) {
+                    return { success: false, error_code: 'not_a_participant', message: 'no conversation given' };
+                }
                 const list = devices.get(body.user_id) || [];
                 return {
                     success: true,
@@ -153,6 +159,7 @@ function fakeServer() {
 
     const server = fakeServer();
     const build = (userId, storage) => createProtectedClient({
+        accountId: userId,
         storage,
         crypto: webcrypto,
         randomBytes: (length) => webcrypto.getRandomValues(new Uint8Array(length)),
@@ -184,13 +191,17 @@ function fakeServer() {
     console.log('PASS: enrollment uses the credential-gated endpoint');
 
     // The wrapping key must not be extractable, or storing state gains nothing.
-    const wrapping = await adaStorage.get('wrapping-key');
+    // Stored under an account-scoped key, so two accounts in one browser cannot
+    // share a wrapping key or a session.
+    assert.equal(await adaStorage.get('wrapping-key'), undefined,
+        'nothing is stored under the old unscoped key');
+    const wrapping = await adaStorage.get('wrapping-key:1');
     assert.equal(wrapping.extractable, false, 'the wrapping key is non-extractable');
     await assert.rejects(() => webcrypto.subtle.exportKey('raw', wrapping),
         'the wrapping key cannot be exported');
     console.log('PASS: session state is wrapped with a non-extractable key');
 
-    const stored = await adaStorage.get('session-state');
+    const stored = await adaStorage.get('session-state:1');
     assert.ok(stored.sealed.length > 0 && stored.iv.length === 12, 'state is stored sealed with an IV');
     assert.ok(!Buffer.from(stored.sealed).includes(Buffer.from('ada@example')),
         'the stored state does not expose the identity in the clear');
@@ -297,6 +308,38 @@ function fakeServer() {
     assert.equal(numberAfter, await tablet.safetyNumber(tabletJoin.groupId),
         'every device computes the same safety number');
     console.log('PASS: the safety number agrees across all three devices');
+
+    // ---- one browser, two accounts -----------------------------------------
+    // The reviewer logged a second account into a store the first had used and
+    // watched it resume the first account's signer, which produces a group
+    // member that the second account's directory has never heard of and cannot
+    // revoke.
+
+    const sharedStore = memoryStorage();
+    const first = createProtectedClient({
+        accountId: 11,
+        storage: sharedStore,
+        crypto: webcrypto,
+        randomBytes: (length) => webcrypto.getRandomValues(new Uint8Array(length)),
+        post: (url, body) => server.post(url, Object.assign({ __userId: 11 }, body)),
+        mls,
+    });
+    await first.enroll({
+        identity: 'first@example', currentPassword: 'secret', secondFactorCode: '111222', keyPackageCount: 1,
+    });
+    assert.equal(await first.resume(), true, 'the first account has a device');
+
+    const second = createProtectedClient({
+        accountId: 12,
+        storage: sharedStore,
+        crypto: webcrypto,
+        randomBytes: (length) => webcrypto.getRandomValues(new Uint8Array(length)),
+        post: (url, body) => server.post(url, Object.assign({ __userId: 12 }, body)),
+        mls,
+    });
+    assert.equal(await second.resume(), false,
+        'a different account in the same browser does not inherit the first one\'s device');
+    console.log('PASS: device state does not cross between accounts sharing a browser');
 
     // ---- authorship comes from MLS, not from the row -----------------------
     // The reviewer changed one server-controlled field and watched authenticated
