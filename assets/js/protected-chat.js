@@ -541,6 +541,9 @@
             const response = await post('api/chat.php', {
                 action: 'send_protected_message',
                 chat_id: chatId,
+                // A retry identifier, so a send that is repeated after a dropped
+                // response returns the original message instead of a duplicate.
+                client_message_id: newRetryId(),
                 envelope: {
                     envelope_version: 1,
                     content_type: 1,
@@ -825,6 +828,11 @@
             const response = await post('api/chat.php', {
                 action: 'send_protected_message',
                 chat_id: chatId,
+                // The blob and the message that carries its key are linked
+                // server-side, so an abandoned upload can be told apart from one
+                // in use and pruned.
+                blob_id: upload.blob_id,
+                client_message_id: newRetryId(),
                 envelope: {
                     envelope_version: 1,
                     content_type: 2,
@@ -1113,6 +1121,19 @@
         }
 
         return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked, recallConversation, rememberConversation, verifyDirectory };
+    }
+
+    /** A retry identifier: a UUID the server uses to recognise the same send. */
+    function newRetryId() {
+        if (typeof crypto === 'object' && typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
+        }
+        const bytes = new Uint8Array(16);
+        (typeof crypto === 'object' ? crypto : require('node:crypto').webcrypto).getRandomValues(bytes);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+        return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
     }
 
     /**

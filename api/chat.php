@@ -809,11 +809,28 @@ try {
                         if (!is_array($envelope)) {
                             throw new InvalidArgumentException('Envelope is required');
                         }
-                        $response = ['success' => true] + $protected->storeEnvelope(
+                        $envelopeBlobId = isset($input['blob_id'])
+                            ? requirePositiveApiId($input['blob_id'], 'Attachment ID')
+                            : null;
+                        $stored = $protected->storeEnvelope(
                             $protectedChatId,
                             $currentUserId,
-                            $envelope
+                            $envelope,
+                            isset($input['client_message_id']) && is_string($input['client_message_id'])
+                                ? $input['client_message_id']
+                                : null,
+                            $envelopeBlobId
                         );
+                        // Tie the ciphertext blob to the message that carries its
+                        // key. Without this the row was never linked, so nothing
+                        // could tell an in-use blob from an abandoned upload.
+                        if ($envelopeBlobId !== null && ($stored['replayed'] ?? false) !== true) {
+                            (new EncryptedBlob())->attachToMessage(
+                                $envelopeBlobId,
+                                (int)$stored['message_id']
+                            );
+                        }
+                        $response = ['success' => true] + $stored;
                         break;
 
                     case 'get_protected_envelopes':

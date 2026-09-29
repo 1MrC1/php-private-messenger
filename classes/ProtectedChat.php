@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/MessageIdempotency.php';
 
 /**
  * Storage and delivery for protected conversations: the server-side half of a
@@ -286,8 +287,13 @@ final class ProtectedChat
      * it, and `content LIKE '%needle%'` cannot match it — so server-side search
      * fails closed for protected chats with no extra code.
      */
-    public function storeEnvelope(int $chatId, int $senderId, array $envelope): array
-    {
+    public function storeEnvelope(
+        int $chatId,
+        int $senderId,
+        array $envelope,
+        ?string $clientMessageId = null,
+        ?int $blobId = null
+    ): array {
         $this->assertProtectionMatches($chatId, true);
         if (!$this->isParticipant($chatId, $senderId)) {
             throw new ProtectedChatMismatch('You are not in this conversation', 'not_a_participant');
@@ -302,6 +308,52 @@ final class ProtectedChat
             'aad_digest' => $aadDigest,
             'ciphertext' => $ciphertext,
         ] = self::parseEnvelope($envelope);
+
+        // Retry protection over ciphertext.
+        //
+        // The plaintext path has had this since the idempotency work; the
+        // protected path had the function and no caller, which a review noticed.
+        // The domain is separate and the input is what the server can already
+        // see, so unlike the plaintext fingerprint this cannot be used as an
+        // oracle for guessed content.
+        $normalizedClientMessageId = null;
+        $fingerprint = null;
+        if ($clientMessageId !== null) {
+            $normalizedClientMessageId = MessageIdempotency::canonicalClientMessageId($clientMessageId);
+            if ($normalizedClientMessageId === null) {
+                throw new ProtectedChatMismatch('Message retry identifier is invalid', 'invalid_client_message_id');
+            }
+            $fingerprint = MessageIdempotency::envelopeFingerprint(
+                $chatId,
+                $ciphertext,
+                $aadDigest,
+                null,
+                $blobId === null ? null : ['sha256' => hash('sha256', 'blob:' . $blobId), 'size' => $blobId]
+            );
+
+            $existing = $this->select(
+                'SELECT id, client_message_fingerprint FROM messages
+                  WHERE sender_id = ? AND client_message_id = ?',
+                'is',
+                [$senderId, $normalizedClientMessageId]
+            );
+            if ($existing !== []) {
+                // The same identifier for the same bytes is a retry; for
+                // different bytes it is a client bug or an attempt to overwrite,
+                // and either way it must not quietly replace anything.
+                if (!hash_equals((string)$existing[0]['client_message_fingerprint'], $fingerprint)) {
+                    throw new ProtectedChatMismatch(
+                        'client_message_id was already used for a different message',
+                        'idempotency_conflict'
+                    );
+                }
+                return [
+                    'message_id' => (int)$existing[0]['id'],
+                    'chat_id' => $chatId,
+                    'replayed' => true,
+                ];
+            }
+        }
 
         $group = $this->select('SELECT group_id, current_epoch FROM mls_groups WHERE chat_id = ?', 'i', [$chatId]);
         if ($group === [] || !hash_equals((string)$group[0]['group_id'], $groupId)) {
@@ -318,11 +370,21 @@ final class ProtectedChat
 
         $this->conn->begin_transaction();
         try {
-            $this->execute(
-                "INSERT INTO messages (chat_id, sender_id, message_type, content) VALUES (?, ?, 'text', '')",
-                'ii',
-                [$chatId, $senderId]
-            );
+            if ($normalizedClientMessageId === null) {
+                $this->execute(
+                    "INSERT INTO messages (chat_id, sender_id, message_type, content) VALUES (?, ?, 'text', '')",
+                    'ii',
+                    [$chatId, $senderId]
+                );
+            } else {
+                $this->execute(
+                    "INSERT INTO messages
+                        (chat_id, sender_id, message_type, content, client_message_id, client_message_fingerprint)
+                     VALUES (?, ?, 'text', '', ?, ?)",
+                    'iiss',
+                    [$chatId, $senderId, $normalizedClientMessageId, $fingerprint]
+                );
+            }
             $messageId = (int)$this->conn->insert_id;
 
             $this->execute(

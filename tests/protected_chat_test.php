@@ -34,6 +34,48 @@ protectedAssert(
     'the plaintext fingerprint still distinguishes content'
 );
 
+// ---- the ciphertext retry path is integrated, not just written -------------
+// A review found `envelopeFingerprint()` had no production caller, so the retry
+// protection it was written for did not exist in practice. These pin the wiring;
+// the behaviour itself was verified against MySQL (a replay returns the original
+// message, a different envelope under the same id is refused).
+
+$protectedSource = (string)file_get_contents($root . '/classes/ProtectedChat.php');
+protectedAssert(
+    str_contains($protectedSource, 'MessageIdempotency::envelopeFingerprint('),
+    'storing an envelope computes the ciphertext fingerprint'
+);
+protectedAssert(
+    str_contains($protectedSource, "'idempotency_conflict'") &&
+        str_contains($protectedSource, "'replayed' => true"),
+    'a repeated retry id returns the original message and a different one is refused'
+);
+protectedAssert(
+    !preg_match('/envelopeFingerprint\([^)]*\$content/s', $protectedSource),
+    'the ciphertext fingerprint is never fed plaintext'
+);
+
+$clientSource = (string)file_get_contents($root . '/assets/js/protected-chat.js');
+protectedAssert(
+    substr_count($clientSource, 'client_message_id: newRetryId()') === 2,
+    'both the text and attachment sends carry a retry identifier'
+);
+protectedAssert(
+    str_contains($clientSource, 'blob_id: upload.blob_id'),
+    'an encrypted attachment is linked to the message that carries its key'
+);
+
+$blobSource = (string)file_get_contents($root . '/classes/EncryptedBlob.php');
+protectedAssert(
+    str_contains($blobSource, 'public function pruneOrphans('),
+    'abandoned ciphertext uploads can be pruned'
+);
+protectedAssert(
+    str_contains($blobSource, 'referenced_message_id IS NULL') &&
+        str_contains($blobSource, '!is_link($real)'),
+    'pruning only removes unreferenced blobs, and never follows a symlink out of the directory'
+);
+
 // ---- the plaintext paths must refuse a protected conversation --------------
 // An independent review (2026-09-29) found that `assertProtectionMatches()` was
 // only ever called on the protected path, so the ordinary send, upload and edit

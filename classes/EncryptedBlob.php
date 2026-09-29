@@ -180,6 +180,48 @@ final class EncryptedBlob
         );
     }
 
+    /**
+     * Delete ciphertext blobs that no message ever referenced.
+     *
+     * An upload that fails between storing the blob and sending the envelope
+     * leaves bytes nobody can fetch — `attachToMessage()` was never called at
+     * all until a review pointed that out, so every blob looked abandoned.
+     * Deployments should run this on a timer; `docs/security/operations.md` in
+     * the private deployment does exactly that for uploads.
+     *
+     * @return array{examined: int, deleted: int}
+     */
+    public function pruneOrphans(int $olderThanHours = 24): array
+    {
+        $hours = max(1, min(720, $olderThanHours));
+        $rows = $this->select(
+            'SELECT id, blob_path FROM encrypted_blobs
+              WHERE referenced_message_id IS NULL
+                AND created_at < (NOW() - INTERVAL ? HOUR)
+              ORDER BY id
+              LIMIT 500',
+            'i',
+            [$hours]
+        );
+
+        $deleted = 0;
+        $root = dirname(__DIR__);
+        $expectedRoot = realpath($root . '/' . self::DIRECTORY);
+        foreach ($rows as $row) {
+            $real = realpath($root . '/' . (string)$row['blob_path']);
+            // Only ever unlink inside the blob directory, and never a symlink.
+            if ($real !== false && $expectedRoot !== false &&
+                strncmp($real, $expectedRoot . DIRECTORY_SEPARATOR, strlen($expectedRoot) + 1) === 0 &&
+                is_file($real) && !is_link($real)) {
+                @unlink($real);
+            }
+            $this->execute('DELETE FROM encrypted_blobs WHERE id = ? AND referenced_message_id IS NULL', 'i', [(int)$row['id']]);
+            $deleted++;
+        }
+
+        return ['examined' => count($rows), 'deleted' => $deleted];
+    }
+
     private function assertWithinQuota(int $uploaderId, int $size): void
     {
         $rows = $this->select(
