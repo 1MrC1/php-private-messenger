@@ -895,6 +895,7 @@
     "protected.recovery_unreadable": "該檔案不是這個版本能識別的復原檔案",
     "protected.not_enrolled": "本裝置尚未為受保護對話完成設定",
     "protected.admit_failed": "對方帳戶的某台裝置無法加入這個對話。",
-    "protected.attachment": "加密檔案"
+    "protected.attachment": "加密檔案",
+    "api.key_packages_required": "需要金鑰套件"
   }
 }

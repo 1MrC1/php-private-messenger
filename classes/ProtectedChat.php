@@ -205,18 +205,29 @@ final class ProtectedChat
         if (!$this->isParticipant($chatId, $userId)) {
             throw new ProtectedChatMismatch('You are not in this conversation', 'not_a_participant');
         }
-        if ($this->isProtected($chatId)) {
-            throw new ProtectedChatMismatch('This conversation is already protected', 'chat_protected');
-        }
-        if ($this->select('SELECT 1 AS present FROM messages WHERE chat_id = ? LIMIT 1', 'i', [$chatId]) !== []) {
-            throw new ProtectedChatMismatch(
-                'A conversation with existing messages cannot be protected',
-                'chat_has_history'
-            );
-        }
-
         $this->conn->begin_transaction();
         try {
+            // Take the conversation row before deciding anything. The plaintext
+            // send and edit paths take the same lock, so a message cannot slip in
+            // between this check and the commit below — which is exactly what a
+            // second review reproduced when the checks sat outside the
+            // transaction.
+            if ($this->select('SELECT id FROM chats WHERE id = ? FOR UPDATE', 'i', [$chatId]) === []) {
+                throw new ProtectedChatMismatch('No such conversation', 'unknown_chat');
+            }
+            if ($this->isProtected($chatId)) {
+                throw new ProtectedChatMismatch('This conversation is already protected', 'chat_protected');
+            }
+            // Only an empty conversation may become protected: otherwise the
+            // interface would call a conversation encrypted while the server still
+            // held its plaintext history.
+            if ($this->select('SELECT 1 AS present FROM messages WHERE chat_id = ? LIMIT 1', 'i', [$chatId]) !== []) {
+                throw new ProtectedChatMismatch(
+                    'A conversation with existing messages cannot be protected',
+                    'chat_has_history'
+                );
+            }
+
             $this->execute(
                 'INSERT INTO chat_protection (chat_id, protocol, protocol_version, established_by)
                  VALUES (?, ?, ?, ?)',

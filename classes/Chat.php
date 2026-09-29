@@ -133,6 +133,51 @@ class Chat
     }
 
     /**
+     * Lock the conversation row and answer the protection question inside the
+     * caller's transaction.
+     *
+     * The earlier check outside the transaction was a check-then-act race, which
+     * a second review reproduced: a plaintext send passed its check, protection
+     * committed, and the plaintext then committed after it — leaving readable
+     * text in a conversation the interface calls encrypted. Both sides now take
+     * the same `chats` row lock, so whichever commits first is seen by the other.
+     *
+     * Must be called inside a transaction, or the lock is released immediately
+     * and buys nothing.
+     */
+    private function protectionUnderLock($chatId)
+    {
+        if (!$this->isPositiveId($chatId)) {
+            return null;
+        }
+        $chatId = (int)$chatId;
+
+        try {
+            $lock = $this->conn->prepare('SELECT id FROM chats WHERE id = ? FOR UPDATE');
+            if ($lock === false) {
+                return null;
+            }
+            try {
+                $lock->bind_param('i', $chatId);
+                if (!$lock->execute()) {
+                    return null;
+                }
+                $result = $lock->get_result();
+                if ($result === false || $result->num_rows === 0) {
+                    // No such conversation: nothing to protect and nothing to send to.
+                    return null;
+                }
+            } finally {
+                $lock->close();
+            }
+        } catch (mysqli_sql_exception $error) {
+            return null;
+        }
+
+        return $this->isProtectedChat($chatId);
+    }
+
+    /**
      * Whether a conversation is protected, or null if that cannot be answered.
      *
      * WHY THIS IS HERE AND NOT ONLY IN THE API. An independent review found the
@@ -1019,6 +1064,29 @@ public function getNewMessages($chat_id, $user_id, $afterMessageId) {
                 throw new RuntimeException('Unable to start message transaction');
             }
             $transactionStarted = true;
+
+            // The check above happened before this transaction existed, so it can
+            // only be trusted once it has been made again under a lock the
+            // protecting path also takes.
+            $protectedUnderLock = $this->protectionUnderLock($chat_id);
+            if ($protectedUnderLock === null) {
+                $this->conn->rollback();
+                $transactionStarted = false;
+                return $this->sendFailureResponse(
+                    'protection_state_unknown',
+                    503,
+                    'This conversation could not be checked for encryption; nothing was sent'
+                );
+            }
+            if ($protectedUnderLock === true) {
+                $this->conn->rollback();
+                $transactionStarted = false;
+                return $this->sendFailureResponse(
+                    'chat_is_protected',
+                    409,
+                    'This conversation is encrypted, so plaintext cannot be sent to it'
+                );
+            }
 
             // Freeze the active recipient set before creating the message. The
             // message, every group/private recipient status, and the unique
@@ -2053,6 +2121,29 @@ private function createMessageStatus($message_id, $recipientIds) {
                 return ['success' => false, 'message' => 'Cannot edit messages older than 48 hours'];
             }
 
+            // Same race as the send path: protection can commit between the
+            // check above and this update, so the answer is taken again under the
+            // conversation lock, inside a transaction.
+            $this->conn->begin_transaction();
+            try {
+                $protectedUnderLock = $this->protectionUnderLock($message['chat_id'] ?? null);
+                if ($protectedUnderLock !== false) {
+                    $this->conn->rollback();
+                    return [
+                        'success' => false,
+                        'error_code' => $protectedUnderLock === true
+                            ? 'chat_is_protected'
+                            : 'protection_state_unknown',
+                        'message' => $protectedUnderLock === true
+                            ? 'Messages in an encrypted conversation cannot be edited'
+                            : 'This conversation could not be checked for encryption; nothing was changed',
+                    ];
+                }
+            } catch (Throwable $lockError) {
+                $this->conn->rollback();
+                throw $lockError;
+            }
+
             // Update message
             $stmt = $this->conn->prepare("
                 UPDATE messages SET content = ?, is_edited = TRUE, updated_at = NOW()
@@ -2060,12 +2151,20 @@ private function createMessageStatus($message_id, $recipientIds) {
             ");
             $stmt->bind_param("sii", $new_content, $message_id, $user_id);
 
+            // The edit and the protection recheck are one unit: committing the
+            // edit without the lock it was checked under would put the race back.
             if ($stmt->execute() && $stmt->affected_rows === 1) {
+                $this->conn->commit();
                 return ['success' => true, 'message' => 'Message edited'];
-            } else {
-                return ['success' => false, 'message' => 'Failed to edit message'];
             }
+            $this->conn->rollback();
+            return ['success' => false, 'message' => 'Failed to edit message'];
         } catch (Exception $e) {
+            try {
+                $this->conn->rollback();
+            } catch (Throwable $ignored) {
+                // Nothing to roll back; the original failure is what matters.
+            }
             error_log("Edit message error: " . $e->getMessage());
             return ['success' => false, 'message' => 'Failed to edit message'];
         }

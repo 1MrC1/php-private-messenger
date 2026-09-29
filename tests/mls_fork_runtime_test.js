@@ -154,6 +154,27 @@ const decoder = new TextDecoder();
         'and the other device sees them as different too');
     console.log('PASS: the safety number distinguishes two groups with the same members');
 
+    // ---- a message from an epoch we have left --------------------------------
+    // Networks deliver out of order. A second review applied a membership commit
+    // before fetching a message sent just before it, and the message became
+    // permanently unreadable because the group kept no past epochs at all.
+
+    const g = session('g@example');
+    const h = session('h@example');
+    const i = session('i@example');
+
+    const pastGroup = g.create_group();
+    const joinH = g.add_member(pastGroup, h.create_key_package());
+    const hGroup = h.join_group(joinH.welcome, joinH.ratchet_tree);
+
+    const missed = g.seal(pastGroup, encoder.encode('sent just before the change'));
+    const laterCommit = g.add_member(pastGroup, i.create_key_package()).commit;
+    assert.equal(h.apply_handshake(laterCommit), 'applied', 'the later change applies first');
+
+    assert.equal(decoder.decode(h.open(hGroup, missed).plaintext), 'sent just before the change',
+        'a message from the epoch we just left is still readable');
+    console.log('PASS: out-of-order delivery across an epoch change does not lose the message');
+
     console.log('MLS fork and state-format tests passed.');
 })().catch((error) => {
     console.error(error);

@@ -98,12 +98,38 @@ protectedAssert(
     'a missing table means no chat is protected; any other failure means unknown'
 );
 protectedAssert(
-    substr_count($chatSource, "'protection_state_unknown'") === 2,
-    'both plaintext paths refuse when the protection state cannot be determined'
+    substr_count($chatSource, "'protection_state_unknown'") >= 2 &&
+        substr_count($chatSource, "'chat_is_protected'") >= 2,
+    'both plaintext paths refuse a protected conversation, and refuse when they cannot tell'
+);
+
+// A check outside the transaction is a check-then-act race, which a second
+// review reproduced: the send passed its check, protection committed, and the
+// plaintext committed after it. Both sides now take the same conversation row.
+protectedAssert(
+    str_contains($chatSource, 'private function protectionUnderLock(') &&
+        str_contains($chatSource, 'SELECT id FROM chats WHERE id = ? FOR UPDATE'),
+    'the plaintext paths can re-ask the question under a row lock'
 );
 protectedAssert(
-    substr_count($chatSource, "'chat_is_protected'") === 2,
-    'both plaintext paths refuse a protected conversation'
+    substr_count($chatSource, '$this->protectionUnderLock(') === 2,
+    'and both of them do, inside their transaction'
+);
+$protectedSourceForLock = (string)file_get_contents($root . '/classes/ProtectedChat.php');
+protectedAssert(
+    preg_match(
+        '/begin_transaction\(\);.{0,400}SELECT id FROM chats WHERE id = \? FOR UPDATE/s',
+        $protectedSourceForLock
+    ) === 1,
+    'establishing protection takes that same lock, inside its own transaction'
+);
+protectedAssert(
+    is_file($root . '/migrations/20260929_enforce_protected_plaintext.sql') &&
+        str_contains(
+            (string)file_get_contents($root . '/migrations/20260929_enforce_protected_plaintext.sql'),
+            'plaintext content is not allowed in a protected conversation'
+        ),
+    'and the database refuses it too, so a future code path cannot reopen the hole'
 );
 
 // The refusal has to precede the write. Compare positions inside each method.
@@ -204,8 +230,15 @@ protectedAssert(
     'no envelope or handshake is posted with a hardcoded epoch'
 );
 protectedAssert(
-    str_contains($client, "session.apply_handshake(payload) === 'applied'"),
+    str_contains($client, 'session.apply_handshake(payload)') &&
+        str_contains($client, "outcome === 'applied'"),
     'the client applies handshakes it fetches, so a membership change does not strand it'
+);
+// One page was not enough: a review hid a genuine removal past the server's cap.
+protectedAssert(
+    str_contains($client, 'for (let page = 0; page < 200; page++)') &&
+        str_contains($client, 'sequence !== lastSequence + 1'),
+    'it pages until the history runs out and refuses a gap in the sequence'
 );
 
 // ---- the envelope fingerprint carries no plaintext -------------------------
@@ -441,9 +474,29 @@ protectedAssert(
     str_contains($renderer, "localized('protected.experimental'"),
     'the mark is labelled from the catalog, not a hardcoded string'
 );
+// What this has to check is that no padlock is *rendered*. Two mistakes were in
+// the way, both found by a second review: PCRE spells a code point \x{...}, so
+// the \u{...} this used to say failed to compile and the assertion passed
+// whatever the file held; and the word "padlock" legitimately appears in a
+// comment explaining why there is no padlock. So: strip comments, then look for a
+// glyph or a string literal, and prove the pattern matches before trusting it.
+$withoutComments = preg_replace(
+    ['~/\*.*?\*/~s', '~(^|\s)//[^\n]*~'],
+    ' ',
+    $renderer
+);
+protectedAssert(is_string($withoutComments), 'the renderer can be read without its comments');
+
+$padlockPattern = '/\x{1F512}|\x{1F510}|\x{1F513}|[\'"]padlock/u';
 protectedAssert(
-    !preg_match('/padlock|\\u{1F512}/u', $renderer),
-    'no padlock is shown, because it would imply a guarantee this does not have'
+    preg_match($padlockPattern, "a \u{1F512} glyph") === 1 &&
+        preg_match($padlockPattern, "className = 'padlock'") === 1 &&
+        preg_match($padlockPattern, '// a comment mentioning a padlock') === 0,
+    'the padlock pattern compiles, matches a glyph and a literal, and ignores prose'
+);
+protectedAssert(
+    preg_match($padlockPattern, (string)$withoutComments) === 0,
+    'no padlock is rendered, because it would imply a guarantee this does not have'
 );
 
 $english = json_decode((string)file_get_contents($root . '/locales/en.json'), true)['messages'];

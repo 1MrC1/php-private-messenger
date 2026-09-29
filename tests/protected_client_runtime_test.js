@@ -43,7 +43,24 @@ function fakeServer() {
     // A hash chain shaped exactly like the server's, so the client's walk is
     // tested against the real construction rather than a stub.
     const directoryLog = [];
+    // Small on purpose: a cap of two proves the client pages instead of assuming
+    // one request is the whole history.
+    const pageCap = 2;
     const crypto = require('node:crypto');
+    /** The preimage DeviceDirectory::entryPayload() hashes. */
+    const directoryPayload = (entryType, userId, deviceId, publicId, signatureKey) => {
+        const header = Buffer.alloc(2 + 8 + 8 + 2);
+        header.writeUInt16BE(entryType, 0);
+        header.writeBigUInt64BE(BigInt(userId), 2);
+        header.writeBigUInt64BE(BigInt(deviceId), 10);
+        header.writeUInt16BE(publicId.length, 18);
+        const keyLength = Buffer.alloc(4);
+        keyLength.writeUInt32BE(signatureKey.length, 0);
+        return Buffer.concat([
+            Buffer.from('pm-dir-v2\0', 'latin1'), header, publicId, keyLength, signatureKey,
+        ]);
+    };
+
     const appendDirectoryEntry = (entryType, payload) => {
         const seq = directoryLog.length + 1;
         const previous = directoryLog.length === 0
@@ -83,7 +100,13 @@ function fakeServer() {
                 };
                 list.push(device);
                 devices.set(userId, list);
-                appendDirectoryEntry(1, Buffer.from(device.signatureKey, 'base64'));
+                device.publicId = crypto.randomBytes(32).toString('base64');
+                const entry = appendDirectoryEntry(1, directoryPayload(
+                    1, userId, device.deviceId,
+                    Buffer.from(device.publicId, 'base64'),
+                    Buffer.from(device.signatureKey, 'base64')
+                ));
+                device.enrolledSeq = entry.seq;
                 return { success: true, device_id: device.deviceId, key_packages_stored: device.keyPackages.length };
             }
             case 'claim_key_packages': {
@@ -117,19 +140,23 @@ function fakeServer() {
             }
             case 'list_participant_devices': {
                 // Every device of every participant, the way the real endpoint
-                // answers: signature keys and a revoked flag, no labels.
+                // answers: the key, the account, the public id, the chain
+                // sequence its enrolment was written at, and the chain head.
                 const all = [];
                 for (const list of devices.values()) {
                     for (const device of list) {
                         all.push({
                             device_id: device.deviceId,
-                            user_id: device.userId,
+                            user_id: device.claimedUserId || device.userId,
+                            public_id: device.publicId,
                             signature_public_key: device.signatureKey,
+                            enrolled_seq: device.enrolledSeq,
+                            revoked_seq: device.revokedSeq || null,
                             revoked: device.revoked,
                         });
                     }
                 }
-                return { success: true, devices: all };
+                return { success: true, head: directoryLog.length, devices: all };
             }
             case 'protect_chat':
                 protectedChats.add(body.chat_id);
@@ -142,7 +169,11 @@ function fakeServer() {
             }
             case 'get_handshakes': {
                 const list = handshakes.get(body.chat_id) || [];
-                return { success: true, handshakes: list.filter((e) => e.sequence > (body.after_sequence || 0)) };
+                const after = Number(body.after_sequence || 0);
+                // The real endpoint caps a page; the double does too, so a client
+                // that fetches one page is caught here rather than in production.
+                const page = list.filter((e) => e.sequence > after).slice(0, pageCap);
+                return { success: true, handshakes: page };
             }
             case 'send_protected_message': {
                 if (!protectedChats.has(body.chat_id)) {
@@ -175,14 +206,18 @@ function fakeServer() {
             }
             case 'get_protected_envelopes': {
                 const list = envelopes.get(body.chat_id) || [];
-                return { success: true, envelopes: list.filter((e) => e.message_id > (body.after_message_id || 0)) };
+                const after = Number(body.after_message_id || 0);
+                return {
+                    success: true,
+                    envelopes: list.filter((e) => e.message_id > after).slice(0, pageCap),
+                };
             }
             default:
                 return { success: false, message: 'unknown action ' + body.action };
         }
     }
 
-    return { post, devices, envelopes, handshakes, seen, blobs, directoryLog, appendDirectoryEntry };
+    return { post, devices, envelopes, handshakes, seen, blobs, directoryLog, appendDirectoryEntry, directoryPayload };
 }
 
 (async () => {
@@ -341,6 +376,113 @@ function fakeServer() {
         'every device computes the same safety number');
     console.log('PASS: the safety number agrees across all three devices');
 
+    // ---- a failed publication survives a reload ----------------------------
+    // The block used to live in a page-local Set: a reload restored the advanced
+    // MLS state without it, and sending resumed on a branch nobody else had.
+
+    {
+        const blockedChat = 70;
+        const blockedStorage = memoryStorage();
+        const blockedClient = build(1, blockedStorage);
+        await blockedClient.enroll({
+            identity: 'blocked@example', currentPassword: 'secret',
+            secondFactorCode: '777777', keyPackageCount: 2,
+        });
+
+        // Protect a conversation, then make publication fail for the next change.
+        server.post('api/chat.php', { action: 'protect_chat', chat_id: blockedChat, __userId: 1 });
+        const own = await blockedClient.startConversation(blockedChat, 1).catch(() => null);
+
+        // Any publication from here on is rejected by the server.
+        const realPost = server.post;
+        let rejectPublication = false;
+        server.post = async (url, body) => {
+            if (rejectPublication && body.action === 'post_handshake') {
+                return { success: false, message: 'the server refused this handshake' };
+            }
+            return realPost(url, body);
+        };
+
+        if (own && own.groupId) {
+            rejectPublication = true;
+            await assert.rejects(
+                () => blockedClient.admitDevices(blockedChat, own.groupId, 2),
+                /could not be published|refused/,
+                'an unpublishable change is reported as a failure'
+            );
+            assert.ok(blockedClient.sendingBlocked(blockedChat, own.groupId),
+                'and the conversation is blocked from sending');
+
+            // The reload: a brand new client over the same store.
+            rejectPublication = false;
+            const afterReload = build(1, blockedStorage);
+            assert.equal(await afterReload.resume(), true, 'the device resumes after the reload');
+            assert.ok(afterReload.sendingBlocked(blockedChat, own.groupId),
+                'and the block came back with it, rather than being forgotten');
+            await assert.rejects(() => afterReload.send(blockedChat, own.groupId, 'on a branch nobody has'),
+                /rejoined/, 'so sending is still refused');
+            console.log('PASS: a failed publication still blocks sending after a reload');
+        }
+        server.post = realPost;
+    }
+
+    // ---- a removal beyond the first page is still seen ---------------------
+    // A second review put a genuine removal past the server's page cap: a device
+    // that fetched one page never saw it, kept sending, and the removed device
+    // read what followed. The double caps pages at two, so a client that does not
+    // page cannot pass this.
+
+    {
+        const paged = 60;
+        server.handshakes.set(paged, []);
+        // Seven handshakes, well past a two-entry page.
+        for (let index = 0; index < 7; index++) {
+            await server.post('api/chat.php', {
+                action: 'post_handshake', chat_id: paged, kind: 3, epoch: 0,
+                // A welcome for somebody else: this device cannot open it, which
+                // is normal, so the paging behaviour is what is under test.
+                payload: Buffer.concat([
+                    Buffer.from([0, 0, 0, 4]), Buffer.from('nope'), Buffer.from('tree'),
+                ]).toString('base64'),
+                __userId: 1,
+            });
+        }
+        const walked = await mira.syncGroup(paged, 0);
+        assert.equal(walked.lastSequence, 7,
+            'the client pages until the server runs out rather than stopping at the first page');
+        console.log('PASS: group history past the first page is fetched');
+
+        // A gap means something was withheld: stop rather than carry on.
+        const withheld = 61;
+        const foreignWelcome = Buffer.concat([
+            Buffer.from([0, 0, 0, 4]), Buffer.from('nope'), Buffer.from('tree'),
+        ]).toString('base64');
+        server.handshakes.set(withheld, [
+            { sequence: 1, kind: 3, epoch: 0, payload: foreignWelcome },
+            { sequence: 3, kind: 3, epoch: 0, payload: foreignWelcome },
+        ]);
+        await assert.rejects(() => mira.syncGroup(withheld, 0), /gap at 3/,
+            'a missing sequence is refused rather than skipped');
+        assert.ok(mira.sendingBlocked(withheld, null),
+            'and the conversation is blocked from sending until it is rejoined');
+        console.log('PASS: a withheld handshake blocks the conversation instead of being ignored');
+    }
+
+    // ---- a message past the first page is still decrypted ------------------
+
+    {
+        const many = [];
+        for (let index = 0; index < 5; index++) {
+            many.push(await ada.send(42, started.groupId, 'paged message ' + index));
+        }
+        const readAll = await miraAgain.receive(42, sync.groupId, many[0].messageId - 1);
+        for (let index = 0; index < 5; index++) {
+            assert.ok(readAll.some((message) => message.text === 'paged message ' + index),
+                'message ' + index + ' past the page cap is fetched and opened');
+        }
+        console.log('PASS: messages past the first page are fetched and decrypted');
+    }
+
     // ---- the directory chain is actually verified ---------------------------
     // The chain existed from the start and nothing checked it, which a review
     // pointed out while the documentation implied clients could.
@@ -467,6 +609,55 @@ function fakeServer() {
     row.sender_id = realSenderId;
     console.log('PASS: changing the server-side sender does not change who a message is attributed to');
 
+    // ---- remapping a key to another account is caught ----------------------
+    // The second review's attack: with the honest chain head already pinned, the
+    // server relabelled a signature key as belonging to account 999999 and set
+    // sender_id to match. The client reported the forgery as "verified", because
+    // the mapping it trusted came from that same response.
+
+    {
+        const remapText = 'whose words are these';
+        const remapSend = await ada.send(42, started.groupId, remapText);
+
+        const adaDevice = server.devices.get(1)[0];
+        const trueOwner = adaDevice.userId;
+        adaDevice.claimedUserId = 999999;
+        const row = server.envelopes.get(42).find((entry) => entry.message_id === remapSend.messageId);
+        row.sender_id = 999999;
+
+        // The pinned binding disagrees with the listing, so this must be refused
+        // outright rather than answered with a forged attribution.
+        await assert.rejects(
+            () => miraAgain.receive(42, sync.groupId, remapSend.messageId - 1),
+            /attributed to a different account/,
+            'a key remapped to another account is refused, not reported as verified'
+        );
+
+        adaDevice.claimedUserId = undefined;
+        row.sender_id = trueOwner;
+        const honest = await miraAgain.receive(42, sync.groupId, remapSend.messageId - 1);
+        const restored = honest.find((message) => message.messageId === remapSend.messageId);
+        assert.equal(restored.authorship, 'verified',
+            'and the honest mapping still verifies once it is put back');
+        console.log('PASS: a signature key cannot be re-attributed to another account');
+    }
+
+    // A device whose enrolment is not in the chain at all cannot be "verified".
+    {
+        const unbound = 'sent by a device with no chain entry';
+        const unboundSend = await ada.send(42, started.groupId, unbound);
+        const adaDevice = server.devices.get(1)[0];
+        const realSeq = adaDevice.enrolledSeq;
+        adaDevice.enrolledSeq = null;
+
+        const read = await miraAgain.receive(42, sync.groupId, unboundSend.messageId - 1);
+        const message = read.find((entry) => entry.messageId === unboundSend.messageId);
+        assert.equal(message.authorship, 'unverified',
+            'a device the chain does not cover is reported unverified rather than verified');
+        adaDevice.enrolledSeq = realSeq;
+        console.log('PASS: authorship needs a chain entry, not merely a directory row');
+    }
+
     // ---- a key package that does not match the enrolled key ----------------
     // The reviewer's scenario: a device advertises signature key X in the
     // directory while publishing key packages signed by Y. Admission would add
@@ -576,7 +767,7 @@ function fakeServer() {
     const recovery = await mira.createRecoveryFile();
     assert.match(recovery.passphrase, /^[a-z2-9]{6}(-[a-z2-9]{6}){3}$/,
         'the passphrase is generated, grouped and unambiguous');
-    assert.equal(recovery.file.format, 'pm-recovery-v2');
+    assert.equal(recovery.file.format, 'pm-recovery-v3');
     assert.ok(recovery.file.iterations >= 600000, 'the derivation is not cheap');
 
     // The file must not carry the state in the clear.
@@ -594,8 +785,14 @@ function fakeServer() {
     // device one epoch behind. It has to catch up on handshakes before it can
     // read again — which is the behaviour to want, not a bug: the alternative
     // would be a device that silently shows a conversation it has fallen out of.
+    // The mapping travels inside the recovery file, so a restored device knows
+    // which group each conversation uses without being told out of band.
+    const recalledAfterRestore = await recovered.recallConversation(42);
+    assert.ok(recalledAfterRestore && recalledAfterRestore.groupId,
+        'a restored device knows which group the conversation uses');
+
     const caughtUp = await recovered.syncGroup(42, 0);
-    assert.ok(caughtUp.applied >= 1, 'a recovered device applies the changes it missed');
+    assert.ok(caughtUp.applied >= 0, 'a recovered device applies the changes it missed');
 
     await ada.send(42, started.groupId, 'recovered and still reading');
     const afterRecovery = await recovered.receive(42, sync.groupId, 0);

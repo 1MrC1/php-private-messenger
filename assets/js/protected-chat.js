@@ -54,6 +54,8 @@
         let session = null;
         let identity = null;
         let signaturePublicKey = null;
+        /** This device's row in the directory, needed to publish more packages. */
+        let deviceId = null;
 
         const encoder = new TextEncoder();
         const decoder = new TextDecoder();
@@ -126,6 +128,7 @@
 
         const conversationsId = 'conversations' + scope;
         const directoryHeadId = 'directory-head' + scope;
+        const bindingsId = 'key-bindings' + scope;
         const historyId = (chatId) => 'history' + scope + ':' + chatId;
 
         /** Which MLS group each conversation uses, and how far we have read. */
@@ -194,6 +197,7 @@
                 identity,
                 signaturePublicKey,
                 accountId,
+                deviceId,
             });
         }
 
@@ -212,6 +216,7 @@
             const plain = await subtle.decrypt({ name: 'AES-GCM', iv: record.iv }, key, record.sealed);
             identity = record.identity;
             signaturePublicKey = record.signaturePublicKey;
+            deviceId = record.deviceId === undefined ? null : record.deviceId;
             return mls.MlsSession.restore(
                 new Uint8Array(plain),
                 record.signaturePublicKey,
@@ -227,6 +232,10 @@
                 return true;
             }
             session = await loadSession();
+            if (session !== null) {
+                // Restore the reasons not to send before anything can send.
+                await loadBlocks();
+            }
             return session !== null;
         }
 
@@ -274,7 +283,9 @@
             }
 
             await saveSession();
-            return { deviceId: response.device_id, keyPackagesStored: response.key_packages_stored };
+            deviceId = response.device_id;
+            await saveSession();
+            return { deviceId, keyPackagesStored: response.key_packages_stored };
         }
 
         // ---- conversations --------------------------------------------------
@@ -397,7 +408,8 @@
                     payload: toBase64(added.commit),
                 });
                 if (!publishedCommit || publishedCommit.success !== true) {
-                    unpublished.add(chatId);
+                    unpublished.add(Number(chatId));
+                    await saveBlocks();
                     throw new Error(
                         (publishedCommit && publishedCommit.message) ||
                         'The group change could not be published, so this conversation needs to be rejoined'
@@ -411,7 +423,8 @@
                     payload: toBase64(concat(lengthPrefixed(added.welcome), added.ratchet_tree)),
                 });
                 if (!publishedWelcome || publishedWelcome.success !== true) {
-                    unpublished.add(chatId);
+                    unpublished.add(Number(chatId));
+                    await saveBlocks();
                     throw new Error(
                         (publishedWelcome && publishedWelcome.message) ||
                         'The invitation could not be published, so the new device cannot join yet'
@@ -425,42 +438,94 @@
         /** Apply any group changes the server is holding for this conversation. */
         async function syncGroup(chatId, afterSequence) {
             await requireSession();
-            const response = await post('api/chat.php', {
-                action: 'get_handshakes',
-                chat_id: chatId,
-                after_sequence: afterSequence || 0,
-            });
-            if (!response || response.success !== true) {
-                throw new Error((response && response.message) || 'Could not fetch group updates');
-            }
 
+            // One request was not enough. The server caps a page at 100
+            // handshakes, and a second review put a genuine removal at sequence
+            // 105: a device that fetched through 104 never saw it, kept sending,
+            // and the removed device read what followed. So: page until the
+            // server runs out, and require the sequences to be contiguous — a gap
+            // means something was withheld, and this device must stop sending
+            // rather than carry on from an incomplete view.
             let joinedGroupId = null;
             let applied = 0;
             let lastSequence = afterSequence || 0;
-            for (const entry of response.handshakes) {
-                lastSequence = entry.sequence;
-                const payload = fromBase64(entry.payload);
-                if (entry.kind === 3) {
-                    // A welcome, carrying the ratchet tree the joiner needs.
-                    const split = readLengthPrefixed(payload);
-                    try {
-                        joinedGroupId = session.join_group(split.head, split.tail);
-                    } catch (error) {
-                        // A welcome addressed to another device is not an error
-                        // for this one; it simply cannot open it.
-                    }
-                    continue;
+            let pages = 0;
+            let complete = false;
+
+            while (pages < 200) {
+                pages++;
+                const response = await post('api/chat.php', {
+                    action: 'get_handshakes',
+                    chat_id: chatId,
+                    after_sequence: lastSequence,
+                });
+                if (!response || response.success !== true) {
+                    throw new Error((response && response.message) || 'Could not fetch group updates');
+                }
+                const handshakes = response.handshakes || [];
+                if (handshakes.length === 0) {
+                    complete = true;
+                    break;
                 }
 
-                // Commits and proposals. Applying these is not optional: when
-                // somebody else changes the membership they move to a new
-                // epoch, and a device that skips the commit stays behind and
-                // can no longer read anything. The queue is in order, so a
-                // commit that arrives before our own welcome is simply for a
-                // group we are not in yet.
-                if (session.apply_handshake(payload) === 'applied') {
-                    applied++;
+                for (const entry of handshakes) {
+                    const sequence = Number(entry.sequence);
+                    if (sequence !== lastSequence + 1) {
+                        incomplete.add(Number(chatId));
+                        await saveBlocks();
+                        throw new Error(
+                            'The group history for this conversation has a gap at ' + sequence +
+                            ', so it cannot be trusted until it is rejoined'
+                        );
+                    }
+                    lastSequence = sequence;
+
+                    const payload = fromBase64(entry.payload);
+                    if (entry.kind === 3) {
+                        // A welcome, carrying the ratchet tree the joiner needs.
+                        try {
+                            const split = readLengthPrefixed(payload);
+                            joinedGroupId = session.join_group(split.head, split.tail);
+                        } catch (error) {
+                            // A welcome addressed to another device is not an error
+                            // for this one; it simply cannot open it.
+                        }
+                        continue;
+                    }
+
+                    // Commits and proposals. Applying these is not optional: when
+                    // somebody else changes the membership they move to a new
+                    // epoch, and a device that skips the commit stays behind and
+                    // can no longer read anything.
+                    //
+                    // A payload that will not even parse is not something to step
+                    // over: it may be the commit that removes somebody. Treat the
+                    // conversation as incomplete and stop sending, the same as a
+                    // gap in the sequence.
+                    let outcome;
+                    try {
+                        outcome = session.apply_handshake(payload);
+                    } catch (error) {
+                        incomplete.add(Number(chatId));
+                        await saveBlocks();
+                        throw new Error(
+                            'A group change in this conversation could not be read (sequence ' + sequence +
+                            '), so it must be rejoined before anything else is sent'
+                        );
+                    }
+                    if (outcome === 'applied') {
+                        applied++;
+                    }
                 }
+            }
+
+            if (!complete) {
+                incomplete.add(Number(chatId));
+                await saveBlocks();
+                throw new Error('This conversation has more group history than could be fetched at once');
+            }
+            if (incomplete.delete(Number(chatId))) {
+                await saveBlocks();
             }
 
             await saveSession();
@@ -489,12 +554,47 @@
          * for sending — stop, and say why.
          */
         const unpublished = new Set();
+        /** Conversations whose group history could not be fetched completely. */
+        const incomplete = new Set();
+
+        /**
+         * Reasons not to send, kept on the device rather than in the page.
+         *
+         * A second review reloaded the page after a failed publication: the
+         * advanced MLS state came back from storage, the in-memory `Set` did not,
+         * and sending resumed on a branch nobody else had. The block has to be as
+         * durable as the state that caused it.
+         */
+        const blockedId = 'send-blocked' + scope;
+
+        async function loadBlocks() {
+            const stored = await readSealed(blockedId, { unpublished: [], incomplete: [] });
+            for (const chatId of stored.unpublished || []) {
+                unpublished.add(Number(chatId));
+            }
+            for (const chatId of stored.incomplete || []) {
+                incomplete.add(Number(chatId));
+            }
+        }
+
+        async function saveBlocks() {
+            await writeSealed(blockedId, {
+                unpublished: Array.from(unpublished),
+                incomplete: Array.from(incomplete),
+            });
+        }
 
         function assertSendable(chatId, groupIdBase64) {
-            if (unpublished.has(chatId)) {
+            if (unpublished.has(Number(chatId))) {
                 throw new Error(
                     'A group change in this conversation was never published, so it must be rejoined ' +
                     'before anything else is sent'
+                );
+            }
+            if (incomplete.has(Number(chatId))) {
+                throw new Error(
+                    'The group history for this conversation could not be fetched completely, so it must ' +
+                    'be rejoined before anything else is sent'
                 );
             }
             if (groupIdBase64 && session.has_diverged(fromBase64(groupIdBase64))) {
@@ -567,13 +667,33 @@
          */
         async function receive(chatId, groupIdBase64, afterMessageId) {
             await requireSession();
-            const response = await post('api/chat.php', {
-                action: 'get_protected_envelopes',
-                chat_id: chatId,
-                after_message_id: afterMessageId || 0,
-            });
-            if (!response || response.success !== true) {
-                throw new Error((response && response.message) || 'Could not fetch messages');
+            // The server caps a page at 100 envelopes and the interface asks from
+            // the beginning, so message 101 was never fetched at all. Page until
+            // the server runs out.
+            const envelopes = [];
+            let cursor = afterMessageId || 0;
+            for (let page = 0; page < 200; page++) {
+                const response = await post('api/chat.php', {
+                    action: 'get_protected_envelopes',
+                    chat_id: chatId,
+                    after_message_id: cursor,
+                });
+                if (!response || response.success !== true) {
+                    throw new Error((response && response.message) || 'Could not fetch messages');
+                }
+                const batch = response.envelopes || [];
+                if (batch.length === 0) {
+                    break;
+                }
+                envelopes.push(...batch);
+                const highestInBatch = batch.reduce(
+                    (top, entry) => Math.max(top, Number(entry.message_id) || 0),
+                    cursor
+                );
+                if (highestInBatch <= cursor) {
+                    break;   // the server is not advancing; stop rather than spin
+                }
+                cursor = highestInBatch;
             }
 
             const groupId = fromBase64(groupIdBase64);
@@ -585,7 +705,7 @@
             const remembered = await recallOpened(chatId);
             const messages = [];
             const toRemember = [];
-            for (const envelope of response.envelopes) {
+            for (const envelope of envelopes) {
                 const previously = remembered[String(envelope.message_id)];
                 if (previously) {
                     messages.push({
@@ -623,9 +743,13 @@
                 // resolved in the server's favour.
                 const authenticated = senderKey ? directory.get(senderKey) : undefined;
                 const claimedSenderId = Number(envelope.sender_id);
+                // "verified" now requires three things to agree: MLS authenticated
+                // the signature, the chain this device pinned says that key belongs
+                // to this account and device, and the row says the same account. A
+                // listing alone is not evidence — that was the hole.
                 const authorship = !readable
                     ? 'unknown'
-                    : (authenticated === undefined
+                    : (authenticated === undefined || authenticated.chainVerified !== true
                         ? 'unverified'
                         : (authenticated.userId === claimedSenderId ? 'verified' : 'mismatched'));
                 let attachment = null;
@@ -676,6 +800,45 @@
         }
 
         /**
+         * Publish more one-time key packages when this device is running low.
+         *
+         * `publishKeyPackages()` on the server had no caller, so a device that
+         * spent its initial ten could never be added to another conversation
+         * again — which also made the exhaustion finding permanent rather than
+         * temporary.
+         */
+        async function replenishKeyPackages() {
+            await requireSession();
+            const listed = await post('api/chat.php', { action: 'list_devices' });
+            if (!listed || listed.success !== true) {
+                return { published: 0 };
+            }
+            if (deviceId === null) {
+                return { published: 0 };
+            }
+            const mine = (listed.devices || []).find((device) => device.device_id === deviceId);
+            if (!mine || mine.needs_more_key_packages !== true) {
+                return { published: 0 };
+            }
+
+            const packages = [];
+            for (let index = 0; index < 10; index++) {
+                packages.push(toBase64(session.create_key_package()));
+            }
+            await saveSession();
+
+            const response = await post('api/chat.php', {
+                action: 'publish_key_packages',
+                device_id: deviceId,
+                key_packages: packages,
+            });
+            if (!response || response.success !== true) {
+                return { published: 0 };
+            }
+            return { published: packages.length };
+        }
+
+        /**
          * The other accounts in a conversation, from the server's own participant
          * device listing rather than from the page.
          */
@@ -703,7 +866,9 @@
          * matching `DeviceDirectory::entryDigest()`.
          */
         async function verifyDirectory() {
-            const head = await readSealed(directoryHeadId, { seq: 0, digest: null });
+            const head = await readSealed(directoryHeadId, { seq: 0, digest: null, entries: {} });
+            const verifiedEntries = head.entries || {};
+            const newEntries = {};
             let previous = head.digest === null ? new Uint8Array(32) : fromBase64(head.digest);
             let seq = head.seq;
             let checked = 0;
@@ -719,6 +884,12 @@
                 }
                 const entries = response.entries || [];
                 if (entries.length === 0) {
+                    // Nothing further. This is where suffix withholding lives: a
+                    // server that simply never serves its newest entries looks
+                    // identical to one that has none. A hash chain cannot close
+                    // that without a head from somewhere the server does not
+                    // control — which is why the head is cross-checked against the
+                    // device listing above, and why the safety number exists.
                     break;
                 }
 
@@ -744,13 +915,24 @@
                         throw new Error('The device directory entry ' + entry.seq + ' does not match its digest');
                     }
 
+                    newEntries[String(entry.seq)] = {
+                        type: Number(entry.entry_type),
+                        payload: entry.payload_digest,
+                    };
                     previous = expected;
                     seq = Number(entry.seq);
                     checked++;
                 }
             }
 
-            await writeSealed(directoryHeadId, { seq, digest: toBase64(previous) });
+            await writeSealed(directoryHeadId, {
+                seq,
+                digest: toBase64(previous),
+                // The digest of each entry, so a device mapping can be checked
+                // against history this client verified rather than against
+                // whatever the current response happens to say.
+                entries: Object.assign({}, verifiedEntries, newEntries),
+            });
             return { verified: checked, head: seq };
         }
 
@@ -781,18 +963,129 @@
             if (!response || response.success !== true) {
                 throw new Error((response && response.message) || 'Could not read the device directory');
             }
+
+            // Whatever the server says about who owns a key has to agree with the
+            // chain this device verified, and with what this device saw first.
+            // Without both, remapping a key to another account was enough to make
+            // forged authorship read as verified.
+            const pinned = await readSealed(bindingsId, {});
+            let verified = await readSealed(directoryHeadId, { seq: 0, entries: {} });
+
+            const claimedHead = Number(response.head || 0);
+            // A head lower than what we have already verified is a rollback: the
+            // server is denying history it has already shown us.
+            if (claimedHead < verified.seq) {
+                throw new Error(
+                    'The device directory is shorter than the history this device already verified; ' +
+                    'compare safety numbers before continuing'
+                );
+            }
+            // Bring the chain up to the head this answer claims, rather than
+            // depending on somebody else having done it first.
+            if (claimedHead > verified.seq) {
+                await verifyDirectory();
+                verified = await readSealed(directoryHeadId, { seq: 0, entries: {} });
+            }
+            // And the server must actually serve what it claims to have.
+            if (verified.seq < claimedHead) {
+                throw new Error(
+                    'The device directory claims more history than it will serve, so it cannot be verified'
+                );
+            }
+            const entries = verified.entries || {};
+            let pinnedChanged = false;
+
             const index = new Map();
             for (const device of response.devices) {
-                index.set(device.signature_public_key, {
+                const binding = {
                     userId: Number(device.user_id),
                     deviceId: Number(device.device_id),
                     revoked: device.revoked === true,
-                });
+                    chainVerified: false,
+                };
+
+                const seq = device.enrolled_seq === null || device.enrolled_seq === undefined
+                    ? null
+                    : Number(device.enrolled_seq);
+                const entry = seq === null ? null : entries[String(seq)];
+                if (entry && entry.type === 1) {
+                    const expected = await directoryPayloadDigest(
+                        1,
+                        binding.userId,
+                        binding.deviceId,
+                        fromBase64(device.public_id),
+                        fromBase64(device.signature_public_key)
+                    );
+                    binding.chainVerified = toBase64(expected) === entry.payload;
+                }
+
+                // First sighting wins, for the life of this device. A server that
+                // wants to remap a key has to have lied from the beginning, which
+                // is the boundary a hash chain can give and no more.
+                const previous = pinned[device.signature_public_key];
+                if (previous) {
+                    if (previous.userId !== binding.userId || previous.deviceId !== binding.deviceId) {
+                        throw new Error(
+                            'A device key in this conversation is now attributed to a different account ' +
+                            'than when this device first saw it; compare safety numbers before continuing'
+                        );
+                    }
+                } else if (binding.chainVerified) {
+                    pinned[device.signature_public_key] = {
+                        userId: binding.userId,
+                        deviceId: binding.deviceId,
+                        seq,
+                    };
+                    pinnedChanged = true;
+                }
+
+                index.set(device.signature_public_key, binding);
+            }
+
+            if (pinnedChanged) {
+                await writeSealed(bindingsId, pinned);
             }
             return index;
         }
 
-        // ---- attachments ----------------------------------------------------
+        /** The preimage `DeviceDirectory::entryPayload()` hashes, digested. */
+        async function directoryPayloadDigest(entryType, userId, deviceId, publicId, signatureKey) {
+            const version = encoder.encode('pm-dir-v2\0');
+            const fixed = new Uint8Array(2 + 8 + 8 + 2 + publicId.length + 4 + signatureKey.length);
+            const view = new DataView(fixed.buffer);
+            let at = 0;
+            view.setUint16(at, entryType); at += 2;
+            view.setUint32(at, Math.floor(userId / 0x100000000)); at += 4;
+            view.setUint32(at, userId >>> 0); at += 4;
+            view.setUint32(at, Math.floor(deviceId / 0x100000000)); at += 4;
+            view.setUint32(at, deviceId >>> 0); at += 4;
+            view.setUint16(at, publicId.length); at += 2;
+            fixed.set(publicId, at); at += publicId.length;
+            view.setUint32(at, signatureKey.length); at += 4;
+            fixed.set(signatureKey, at);
+
+            const preimage = new Uint8Array(version.length + fixed.length);
+            preimage.set(version, 0);
+            preimage.set(fixed, version.length);
+            return new Uint8Array(await subtle.digest('SHA-256', preimage));
+        }
+
+// Protected conversations: the browser half.
+//
+// This ties three things together: the MLS engine in assets/vendor/mls/, the
+// key transport in api/chat.php, and local storage of the device's own state.
+//
+// WHAT THIS IS NOT. It is not finished and it has not been independently
+// reviewed. Nothing here entitles the interface to claim end-to-end encryption;
+// see docs/security/e2ee-readiness.md for what is still required.
+//
+// THREAT MODEL, PLAINLY. Device state is written to IndexedDB wrapped with a
+// non-extractable AES-GCM key, so at rest it is inert without that key and
+// cannot be read out by a script that only reaches storage. While the tab is
+// open the material is live in WebAssembly memory, so a cross-site scripting
+// bug defeats this. The content security policy and the no-markup renderer are
+// what stand in the way of that; the boundary this design can honestly defend
+// is the server operator's database and backups, not a compromised browser.
 
         /**
          * Encrypt a file, upload the ciphertext, and send the key inside the
@@ -952,7 +1245,7 @@
             // and the KDF parameters sat outside the AEAD, so they could be
             // rewritten without the file failing to open.
             const header = {
-                format: 'pm-recovery-v2',
+                format: 'pm-recovery-v3',
                 kdf: 'PBKDF2-SHA512',
                 iterations: RECOVERY_ITERATIONS,
                 salt: toBase64(salt),
@@ -961,11 +1254,19 @@
                 signature_public_key: toBase64(signaturePublicKey),
                 account_id: accountId,
             };
+            // The session alone was not enough to recover with: a restored device
+            // knew its keys but not which MLS group each conversation used, so it
+            // could not reopen anything without that mapping from somewhere else.
+            // It travels inside the ciphertext.
+            const payload = JSON.stringify({
+                state: toBase64(session.export_state()),
+                conversations: await readSealed(conversationsId, {}),
+            });
             const sealed = new Uint8Array(
                 await subtle.encrypt(
                     { name: 'AES-GCM', iv, additionalData: encoder.encode(canonicalHeader(header)) },
                     key,
-                    session.export_state()
+                    encoder.encode(payload)
                 )
             );
 
@@ -977,7 +1278,7 @@
 
         /** Restore a device from a recovery file and its passphrase. */
         async function restoreFromRecoveryFile(file, passphrase) {
-            if (!file || file.format !== 'pm-recovery-v2') {
+            if (!file || file.format !== 'pm-recovery-v3') {
                 throw new Error('That is not a recovery file this version understands');
             }
             if (file.kdf !== 'PBKDF2-SHA512') {
@@ -1021,10 +1322,23 @@
                 throw new Error('That passphrase does not open this recovery file');
             }
 
+            let restored;
+            try {
+                restored = JSON.parse(decoder.decode(new Uint8Array(plain)));
+            } catch (error) {
+                throw new Error('That recovery file could not be read');
+            }
+
             identity = fromBase64(file.identity);
             signaturePublicKey = fromBase64(file.signature_public_key);
-            session = mls.MlsSession.restore(new Uint8Array(plain), signaturePublicKey, identity);
+            session = mls.MlsSession.restore(fromBase64(restored.state), signaturePublicKey, identity);
             await saveSession();
+
+            // Put the conversation mapping back, or the restored device would hold
+            // the right keys and still be unable to open anything.
+            if (restored.conversations && typeof restored.conversations === 'object') {
+                await writeSealed(conversationsId, restored.conversations);
+            }
             return true;
         }
 
@@ -1127,13 +1441,14 @@
                 // The removal took effect locally the moment it was created, so
                 // an unpublished one leaves us alone on a branch where the device
                 // is gone while everyone else still has it.
-                unpublished.add(chatId);
+                unpublished.add(Number(chatId));
+                await saveBlocks();
                 throw new Error((response && response.message) || 'Could not publish the removal');
             }
             return { epoch: where.epoch };
         }
 
-        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked, recallConversation, rememberConversation, verifyDirectory, participants };
+        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked, recallConversation, rememberConversation, verifyDirectory, participants, replenishKeyPackages };
     }
 
     /** A retry identifier: a UUID the server uses to recognise the same send. */

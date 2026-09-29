@@ -895,6 +895,7 @@
     "protected.recovery_unreadable": "该文件不是这个版本能识别的恢复文件",
     "protected.not_enrolled": "本设备尚未为受保护会话完成设置",
     "protected.admit_failed": "对方账户的某台设备无法加入这个会话。",
-    "protected.attachment": "加密文件"
+    "protected.attachment": "加密文件",
+    "api.key_packages_required": "需要密钥包"
   }
 }

@@ -24,6 +24,9 @@ require_once __DIR__ . '/ProtectedChat.php';
  */
 final class DeviceDirectory
 {
+    /** Bumped when the hashed preimage changes shape. */
+    public const PAYLOAD_VERSION = "pm-dir-v2\0";
+
     public const ENTRY_ENROLLED = 1;
     public const ENTRY_REVOKED = 2;
 
@@ -32,6 +35,12 @@ final class DeviceDirectory
     public const MAX_SIGNATURE_KEY_BYTES = 1024;
     public const MAX_CREDENTIAL_BYTES = 4096;
     public const LOW_WATERMARK = 5;
+    /**
+     * How many of one account's one-time key packages a single other account may
+     * consume in an hour. A conversation needs one per device of the other
+     * account, so this is generous for honest use and useless for exhaustion.
+     */
+    public const MAX_CLAIMS_PER_HOUR = 12;
 
     private Database $db;
     private mysqli $conn;
@@ -88,7 +97,12 @@ final class DeviceDirectory
             $deviceId = (int)$this->conn->insert_id;
 
             $this->insertKeyPackages($deviceId, $packages);
-            $this->appendDirectoryEntry(self::ENTRY_ENROLLED, $userId, $deviceId, $publicId . $signatureKey);
+            $this->appendDirectoryEntry(
+                self::ENTRY_ENROLLED,
+                $userId,
+                $deviceId,
+                self::entryPayload(self::ENTRY_ENROLLED, $userId, $deviceId, $publicId, $signatureKey)
+            );
 
             $this->conn->commit();
         } catch (mysqli_sql_exception $error) {
@@ -131,7 +145,12 @@ final class DeviceDirectory
                 'i',
                 [$deviceId]
             );
-            $this->appendDirectoryEntry(self::ENTRY_REVOKED, $userId, $deviceId, (string)$rows[0]['public_id']);
+            $this->appendDirectoryEntry(
+                self::ENTRY_REVOKED,
+                $userId,
+                $deviceId,
+                self::entryPayload(self::ENTRY_REVOKED, $userId, $deviceId, (string)$rows[0]['public_id'])
+            );
             $this->conn->commit();
         } catch (Throwable $error) {
             $this->conn->rollback();
@@ -182,7 +201,7 @@ final class DeviceDirectory
      * or timestamps: a signature key is already public to the group through the
      * ratchet tree, but a device's name is nobody else's business.
      *
-     * @return list<array{device_id: int, user_id: int, signature_public_key: string, revoked: bool}>
+     * @return array{head: int, devices: list<array<string, mixed>>}
      */
     public function participantDevices(int $chatId, int $viewerId, ProtectedChat $chats): array
     {
@@ -191,22 +210,39 @@ final class DeviceDirectory
         }
 
         $rows = $this->select(
-            'SELECT d.id, d.user_id, d.signature_public_key, d.revoked_at
+            'SELECT d.id, d.user_id, d.public_id, d.signature_public_key, d.revoked_at,
+                    (SELECT MIN(l.seq) FROM e2ee_directory_log l
+                      WHERE l.user_id = d.user_id AND l.device_id = d.id AND l.entry_type = ?
+                    ) AS enrolled_seq,
+                    (SELECT MIN(l.seq) FROM e2ee_directory_log l
+                      WHERE l.user_id = d.user_id AND l.device_id = d.id AND l.entry_type = ?
+                    ) AS revoked_seq
              FROM e2ee_devices d
              JOIN chat_participants p ON p.user_id = d.user_id
              WHERE p.chat_id = ? AND p.left_at IS NULL
              ORDER BY d.user_id, d.id',
-            'i',
-            [$chatId]
+            'iii',
+            [self::ENTRY_ENROLLED, self::ENTRY_REVOKED, $chatId]
         );
 
-        return array_map(static fn(array $row): array => [
-            'device_id' => (int)$row['id'],
-            'user_id' => (int)$row['user_id'],
-            // Stored as bytes, returned as base64 like every other key here.
-            'signature_public_key' => base64_encode((string)$row['signature_public_key']),
-            'revoked' => $row['revoked_at'] !== null,
-        ], $rows);
+        // The chain head travels with the answer, so a client can insist that
+        // every device it is told about is covered by history it has verified.
+        $head = $this->select('SELECT COALESCE(MAX(seq), 0) AS head FROM e2ee_directory_log', '', []);
+
+        return [
+            'head' => (int)($head[0]['head'] ?? 0),
+            'devices' => array_map(static fn(array $row): array => [
+                'device_id' => (int)$row['id'],
+                'user_id' => (int)$row['user_id'],
+                // Everything the client needs to recompute the hashed preimage and
+                // check this mapping against the chain it has pinned.
+                'public_id' => base64_encode((string)$row['public_id']),
+                'signature_public_key' => base64_encode((string)$row['signature_public_key']),
+                'enrolled_seq' => $row['enrolled_seq'] === null ? null : (int)$row['enrolled_seq'],
+                'revoked_seq' => $row['revoked_seq'] === null ? null : (int)$row['revoked_seq'],
+                'revoked' => $row['revoked_at'] !== null,
+            ], $rows),
+        ];
     }
 
     // ---- key packages ------------------------------------------------------
@@ -260,6 +296,27 @@ final class DeviceDirectory
             throw new ProtectedChatMismatch(
                 'Key packages can only be claimed for a conversation you are both in',
                 'not_a_participant'
+            );
+        }
+
+        // Participation alone did not fix the exhaustion a second review found:
+        // anyone who can start a private conversation satisfies it, and can then
+        // claim in a loop. Claims are bounded per claimant, per target, per hour,
+        // and a conversation only needs one round of them.
+        $recent = $this->select(
+            'SELECT COUNT(*) AS spent
+               FROM e2ee_key_packages k
+               JOIN e2ee_devices d ON d.id = k.device_id
+              WHERE d.user_id = ?
+                AND k.consumed_by_user_id = ?
+                AND k.consumed_at >= (NOW() - INTERVAL 1 HOUR)',
+            'ii',
+            [$targetUserId, $claimingUserId]
+        );
+        if ((int)($recent[0]['spent'] ?? 0) >= self::MAX_CLAIMS_PER_HOUR) {
+            throw new ProtectedChatMismatch(
+                'Too many key packages have been claimed for that account recently',
+                'key_package_claim_limited'
             );
         }
 
@@ -388,6 +445,34 @@ final class DeviceDirectory
     public static function entryDigest(int $seq, string $previousDigest, int $entryType, string $payloadDigest): string
     {
         return hash('sha256', pack('J', $seq) . $previousDigest . pack('n', $entryType) . $payloadDigest, true);
+    }
+
+    /**
+     * The preimage a client can recompute to check who a key belongs to.
+     *
+     * A second review remapped a signature key to another account and watched the
+     * client report the forged authorship as verified: the chain hashed the public
+     * id and the key, but never the account or the device, so nothing tied the
+     * mapping the client trusted to the history it had pinned. The account and
+     * device are part of the preimage now, and the client recomputes it.
+     *
+     * Versioned, because entries written before this change hash the old
+     * preimage; a client treats those devices as unbound rather than pretending
+     * they were verified.
+     */
+    public static function entryPayload(
+        int $entryType,
+        int $userId,
+        int $deviceId,
+        string $publicId,
+        string $signatureKey = ''
+    ): string {
+        return self::PAYLOAD_VERSION
+            . pack('n', $entryType)
+            . pack('J', $userId)
+            . pack('J', $deviceId)
+            . pack('n', strlen($publicId)) . $publicId
+            . pack('N', strlen($signatureKey)) . $signatureKey;
     }
 
     private function appendDirectoryEntry(int $entryType, int $userId, int $deviceId, string $payload): void

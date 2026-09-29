@@ -641,6 +641,7 @@ try {
 
         case 'list_devices':
         case 'claim_key_packages':
+        case 'publish_key_packages':
         case 'list_participant_devices':
         case 'get_directory_log':
             // Device identity and key transport. Everything exchanged here is
@@ -685,19 +686,37 @@ try {
                         ];
                         break;
 
+                    case 'publish_key_packages':
+                        // Public one-time material for a device that is already
+                        // enrolled, so a session is enough: enrolment is what
+                        // needed the password and second factor. Without this a
+                        // device that spent its initial packages could never be
+                        // added to another conversation again.
+                        $publishDeviceId = requirePositiveApiId($input['device_id'] ?? null, 'Device ID');
+                        $publishPackages = $input['key_packages'] ?? null;
+                        if (!is_array($publishPackages) || $publishPackages === []) {
+                            throw new InvalidArgumentException('Key packages are required');
+                        }
+                        $response = ['success' => true] + $directory->publishKeyPackages(
+                            (int)$currentUser['id'],
+                            $publishDeviceId,
+                            array_values(array_map(
+                                static fn($value): string => is_string($value) ? $value : '',
+                                $publishPackages
+                            ))
+                        );
+                        break;
+
                     case 'list_participant_devices':
                         // So a client can notice that a member of the group
                         // belongs to a revoked device and publish a removal.
                         // The server cannot do that itself: it holds no keys.
                         $deviceChatId = requirePositiveApiId($input['chat_id'] ?? null, 'Chat ID');
-                        $response = [
-                            'success' => true,
-                            'devices' => $directory->participantDevices(
-                                $deviceChatId,
-                                (int)$currentUser['id'],
-                                new ProtectedChat()
-                            ),
-                        ];
+                        $response = ['success' => true] + $directory->participantDevices(
+                            $deviceChatId,
+                            (int)$currentUser['id'],
+                            new ProtectedChat()
+                        );
                         break;
 
                     default:

@@ -895,6 +895,7 @@
     "protected.recovery_unreadable": "Ese archivo no es un archivo de recuperación que esta versión entienda",
     "protected.not_enrolled": "Este dispositivo aún no está configurado para conversaciones protegidas",
     "protected.admit_failed": "No se pudo añadir a esta conversación un dispositivo de la otra cuenta.",
-    "protected.attachment": "Archivo cifrado"
+    "protected.attachment": "Archivo cifrado",
+    "api.key_packages_required": "Se requieren paquetes de claves"
   }
 }

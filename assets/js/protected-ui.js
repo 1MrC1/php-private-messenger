@@ -96,6 +96,7 @@
         /** Join a conversation this device was invited to. */
         async function adoptConversation(chatId) {
             const active = await ensureClient();
+            await refreshProtectionPins(chatId);
             if (!(await active.resume())) {
                 return null;
             }
@@ -182,9 +183,41 @@
                 : (typeof window === 'object' && window ? window.currentUserId : null);
         }
 
+        /**
+         * Whether a conversation is protected.
+         *
+         * The row's flag comes from the server, and a review pointed out what that
+         * means for the stated adversary: answering `is_protected: false` routed
+         * the next message to the plaintext client. Protection is irreversible, so
+         * anything this device has already established outranks what the server
+         * says now. The page-local record is consulted first because this runs on
+         * every keystroke path; `refreshProtectionPins()` fills it from the sealed
+         * store when a conversation is opened.
+         */
         function isProtected(chatId) {
+            const known = conversations.get(chatId);
+            if (known && (known.protected === true || known.groupId)) {
+                return true;
+            }
+            if (pinnedProtected.has(Number(chatId))) {
+                return true;
+            }
             const row = doc.querySelector('.chat-item[data-chat-id="' + chatId + '"]');
             return !!row && row.dataset.protected === 'true';
+        }
+
+        /** Conversations this device has itself established as protected. */
+        const pinnedProtected = new Set();
+
+        async function refreshProtectionPins(chatId) {
+            try {
+                const client = await ensureClient();
+                if (await client.knownProtected(chatId)) {
+                    pinnedProtected.add(Number(chatId));
+                }
+            } catch (error) {
+                // A device with no session has nothing pinned yet.
+            }
         }
 
         /** Send through the encrypting client instead of the plaintext path. */
@@ -436,6 +469,7 @@
             restoreFromFile,
             showSafetyNumber,
             decorateMessages,
+            refreshProtectionPins,
             conversations,
         };
     }

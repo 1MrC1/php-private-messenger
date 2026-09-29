@@ -895,6 +895,7 @@
     "protected.recovery_unreadable": "هذا الملف ليس ملف استعادة يفهمه هذا الإصدار",
     "protected.not_enrolled": "لم يُهيَّأ هذا الجهاز بعد للمحادثات المحمية",
     "protected.admit_failed": "لم يتمكّن أحد أجهزة الحساب الآخر من الانضمام إلى هذه المحادثة.",
-    "protected.attachment": "ملف مشفَّر"
+    "protected.attachment": "ملف مشفَّر",
+    "api.key_packages_required": "حِزم المفاتيح مطلوبة"
   }
 }

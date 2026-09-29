@@ -392,10 +392,10 @@ foreach ($flattened['en'] as $message) {
 }
 
 $requiredApiEnvelopeSources = preg_split('/\\R/u', trim(<<<'PM_API_ENVELOPE_SOURCES'
-2FA disabled. Please sign in again.
 2FA disabled successfully
-2FA enabled. Please sign in again.
+2FA disabled. Please sign in again.
 2FA enabled successfully
+2FA enabled. Please sign in again.
 2FA is already enabled. Disable it before replacing the authenticator.
 2FA is not enabled for this account
 2FA setup expired. Start again.
@@ -404,15 +404,15 @@ $requiredApiEnvelopeSources = preg_split('/\\R/u', trim(<<<'PM_API_ENVELOPE_SOUR
 2FA verification is required. Please login again.
 2FA verification required
 2FA verification successful
+A fresh 2FA code or backup code is required
 Access denied
 Action not available
-A fresh 2FA code or backup code is required
 An attachment is required for this message type
 Another message is still being processed. Please retry shortly
 Attachment security scanning is temporarily unavailable
+Attachment storage is temporarily unavailable
 Attachments must be no larger than 50 MB
 Attachments must use the upload endpoint
-Attachment storage is temporarily unavailable
 Authentication required
 Authentication state changed. Please login again.
 Authentication state changed. Please sign in again.
@@ -428,7 +428,6 @@ Chat ID and message IDs are required
 Chat ID and search query are required
 Chat ID and typing status are required
 Chat ID is required
-client_message_id was already used for a different message
 Content-Type must be application/json
 Content-Type must be multipart/form-data
 Cross-origin request denied
@@ -459,12 +458,12 @@ First name and last name contain invalid characters
 Hourly upload attempt limit reached
 Invalid 2FA code
 Invalid 2FA code or backup code
+Invalid Content-Length
 Invalid action
 Invalid action or missing action parameter
 Invalid chat
 Invalid chat background setting
 Invalid chat participant
-Invalid Content-Length
 Invalid credentials
 Invalid email address
 Invalid font size setting
@@ -483,25 +482,27 @@ Invalid setting value
 Invalid theme setting
 Invalid upload request
 Invalid verification code
-Invalid verification code. Please try again.
 Invalid verification code or backup code
+Invalid verification code. Please try again.
+Key packages are required
 Limit cannot exceed 100
 Logged out successfully
 Login completion failed
 Login failed. Please try again.
 Logout failed
+Message ID and emoji are required
+Message ID and new content are required
+Message ID is required
 Message context limits cannot exceed 50
 Message deleted
 Message delivery could not be confirmed
 Message edited
-Message ID and emoji are required
-Message ID and new content are required
-Message ID is required
 Message not found
 Message not found or access denied
 Message rate limit reached. Please slow down
 Message retry identifier is invalid
 Message retry protection is temporarily unavailable
+Messages in an encrypted conversation cannot be edited
 Messaging is temporarily unavailable
 Method not allowed
 Missing required fields
@@ -514,16 +515,16 @@ No file uploaded
 No pending 2FA verification
 No pending 2FA verification. Please login again.
 No valid settings to update
-Password changed. Please sign in again.
 Password changed successfully
+Password changed. Please sign in again.
 Password changes must use account settings
 Password must be between 12 and 72 characters
 Phone number is invalid
 Phone number is too long
 Profile data is too long
 Profile fields are invalid
-Profile updated successfully
 Profile update failed
+Profile updated successfully
 Reaction added
 Registration failed
 Registration successful
@@ -559,6 +560,9 @@ The request is invalid
 This attachment type is not supported
 This attachment was rejected by security scanning
 This avatar was rejected by security scanning
+This conversation could not be checked for encryption; nothing was changed
+This conversation could not be checked for encryption; nothing was sent
+This conversation is encrypted, so plaintext cannot be sent to it
 This user is not accepting new chats
 Too many 2FA attempts. Try again later.
 Too many 2FA setup attempts. Try again later.
@@ -573,31 +577,28 @@ Too many verification attempts. Try again later.
 Typing status must be a boolean
 Typing status updated
 Unsupported Content-Type
-User account not found
 User ID is required
+User account not found
+User not found
+User settings not found
 Username and password are required
 Username and password cannot be empty
 Username is already taken
 Username must be 3-50 letters, numbers, dots, dashes, or underscores
 Username or email already exists
-User not found
-User settings not found
 Verification code is required
 Verification failed
 Verification is temporarily unavailable. Please try again.
 You no longer have access to this chat
 Your attachment storage quota has been reached
 Your hourly attachment limit has been reached
-Messages in an encrypted conversation cannot be edited
-This conversation could not be checked for encryption; nothing was changed
-This conversation could not be checked for encryption; nothing was sent
-This conversation is encrypted, so plaintext cannot be sent to it
+client_message_id was already used for a different message
 PM_API_ENVELOPE_SOURCES
 ));
 i18nCatalogAssert(
     is_array($requiredApiEnvelopeSources) &&
-        count($requiredApiEnvelopeSources) === 200 &&
-        count(array_unique($requiredApiEnvelopeSources)) === 200,
+        count($requiredApiEnvelopeSources) === 201 &&
+        count(array_unique($requiredApiEnvelopeSources)) === 201,
     'the audited public API envelope source fixture is complete and duplicate-free'
 );
 $missingApiEnvelopeSources = [];

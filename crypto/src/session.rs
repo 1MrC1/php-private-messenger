@@ -23,6 +23,17 @@ use wasm_bindgen::prelude::*;
 
 use crate::CIPHERSUITE;
 
+/// How many past epochs a group keeps decryption keys for.
+///
+/// Zero — the default — means a message from an epoch the group has left cannot
+/// be read at all. A second review hit exactly that: a device that applied a
+/// membership commit before fetching a message sent just before it lost the
+/// message permanently. Keeping a bounded window closes that without keeping
+/// keys forever; the cost is that a compromise of the device reaches a few more
+/// recent epochs, which is the same trade every messenger makes for delivery
+/// that is not perfectly ordered.
+const MAX_PAST_EPOCHS: usize = 8;
+
 /// The default provider owns its storage privately, so it cannot be restored
 /// from exported bytes. This is the same pair of parts, assembled so it can.
 pub struct PersistableProvider {
@@ -166,7 +177,9 @@ impl MlsSession {
         let group = MlsGroup::new(
             &self.provider,
             &signer,
-            &MlsGroupCreateConfig::default(),
+            &MlsGroupCreateConfig::builder()
+                .max_past_epochs(MAX_PAST_EPOCHS)
+                .build(),
             credential,
         )
         .map_err(|error| JsValue::from_str(&format!("group creation failed: {error:?}")))?;
@@ -254,7 +267,9 @@ impl MlsSession {
 
         let staged = StagedWelcome::new_from_welcome(
             &self.provider,
-            &MlsGroupJoinConfig::default(),
+            &MlsGroupJoinConfig::builder()
+                .max_past_epochs(MAX_PAST_EPOCHS)
+                .build(),
             welcome,
             Some(tree),
         )

@@ -72,6 +72,7 @@ function fakeClient(options) {
         },
         sendingBlocked: () => options.sendingBlocked || null,
         participants: async () => options.participants || [],
+        knownProtected: async () => options.knownProtected === true,
         sendAttachment: async (chatId, groupId, name, bytes) => {
             state.attachments = state.attachments || [];
             state.attachments.push({ chatId, groupId, name, size: bytes.length });
@@ -348,6 +349,24 @@ function fakeClient(options) {
         assert.equal(client.state.restored.passphrase, 'spaced-passphrase',
             'restoring trims what was typed and passes the parsed file');
         console.log('PASS: a recovery file can be restored from the interface');
+    }
+
+    // ---- the server cannot talk the client out of encryption ---------------
+    // The row's flag is the server's word. A review pointed out that answering
+    // is_protected:false routed the next message to the legacy plaintext client.
+
+    {
+        const doc = fakeDocument([]);
+        // The server now claims the conversation is not protected.
+        doc.markChatProtected(42, false);
+        const client = fakeClient({ enrolled: true, knownProtected: true });
+        const ui = makeUi(doc, client);
+
+        assert.equal(ui.isProtected(42), false, 'before this device knows anything, the row is all there is');
+        await ui.refreshProtectionPins(42);
+        assert.equal(ui.isProtected(42), true,
+            'once this device has established protection, the server cannot unsay it');
+        console.log('PASS: a server claiming a protected conversation is plaintext is not believed');
     }
 
     console.log('Protected interface runtime tests passed.');
