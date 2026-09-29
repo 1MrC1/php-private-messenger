@@ -879,6 +879,7 @@
     "api.protection_state_unknown_edit": "This conversation could not be checked for encryption; nothing was changed",
     "protected.rejoin_required": "This conversation has to be rejoined before anything else is sent.",
     "protected.author_mismatch": "This message was signed by a different account than the one shown.",
-    "protected.author_unverified": "The sender of this message could not be verified."
+    "protected.author_unverified": "The sender of this message could not be verified.",
+    "protected.directory_changed": "The device directory does not match what this device saw before. Compare safety numbers before continuing."
   }
 }

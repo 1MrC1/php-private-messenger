@@ -76,6 +76,111 @@
             return key;
         }
 
+        /**
+         * A small sealed store beside the session, for two things a reload
+         * otherwise destroys.
+         *
+         * A review found both. The chat-to-group mapping lived only in a page
+         * `Map`, so after a reload the interface could not tell which MLS group
+         * a conversation used — and the welcome that would have told it has
+         * already been consumed. And an MLS application message decrypts exactly
+         * once, so every message read before the reload became permanently
+         * unreadable: a protected conversation showed no history at all.
+         *
+         * Plaintext at rest is a real cost, so it is sealed with the same
+         * non-extractable key as the session and bounded per conversation. The
+         * alternative is a messenger that forgets every conversation when the tab
+         * closes, which nobody would use and which would push people back to the
+         * plaintext path.
+         */
+        const HISTORY_LIMIT = 500;
+
+        async function readSealed(id, fallback) {
+            const record = await storage.get(id);
+            if (!record) {
+                return fallback;
+            }
+            if ((record.accountId ?? null) !== accountId) {
+                return fallback;
+            }
+            try {
+                const key = await wrappingKey();
+                const plain = await subtle.decrypt({ name: 'AES-GCM', iv: record.iv }, key, record.sealed);
+                return JSON.parse(decoder.decode(new Uint8Array(plain)));
+            } catch (error) {
+                // A record we cannot open is a record we cannot trust.
+                return fallback;
+            }
+        }
+
+        async function writeSealed(id, value) {
+            const key = await wrappingKey();
+            const iv = randomBytes(12);
+            const sealed = await subtle.encrypt(
+                { name: 'AES-GCM', iv },
+                key,
+                encoder.encode(JSON.stringify(value))
+            );
+            await storage.put(id, { iv, sealed: new Uint8Array(sealed), accountId });
+        }
+
+        const conversationsId = 'conversations' + scope;
+        const directoryHeadId = 'directory-head' + scope;
+        const historyId = (chatId) => 'history' + scope + ':' + chatId;
+
+        /** Which MLS group each conversation uses, and how far we have read. */
+        async function rememberConversation(chatId, groupIdBase64, cursors) {
+            const known = await readSealed(conversationsId, {});
+            const existing = known[String(chatId)] || {};
+            known[String(chatId)] = {
+                groupId: groupIdBase64 || existing.groupId || null,
+                lastSequence: (cursors && cursors.lastSequence !== undefined)
+                    ? cursors.lastSequence
+                    : (existing.lastSequence || 0),
+                lastMessageId: (cursors && cursors.lastMessageId !== undefined)
+                    ? cursors.lastMessageId
+                    : (existing.lastMessageId || 0),
+            };
+            await writeSealed(conversationsId, known);
+            return known[String(chatId)];
+        }
+
+        /** What we knew about a conversation before the page reloaded. */
+        async function recallConversation(chatId) {
+            const known = await readSealed(conversationsId, {});
+            return known[String(chatId)] || null;
+        }
+
+        async function rememberOpened(chatId, entries) {
+            if (entries.length === 0) {
+                return;
+            }
+            const id = historyId(chatId);
+            const history = await readSealed(id, {});
+            for (const entry of entries) {
+                history[String(entry.messageId)] = {
+                    text: entry.text,
+                    authorship: entry.authorship,
+                    senderId: entry.senderId,
+                    claimedSenderId: entry.claimedSenderId,
+                    attachment: entry.attachment || null,
+                    contentType: entry.contentType,
+                    createdAt: entry.createdAt,
+                };
+            }
+            // Bounded: keep the most recent by message id.
+            const ids = Object.keys(history).map(Number).sort((left, right) => left - right);
+            while (ids.length > HISTORY_LIMIT) {
+                delete history[String(ids.shift())];
+            }
+            await writeSealed(id, history);
+        }
+
+        /** Messages this device has already opened, by message id. */
+        async function recallOpened(chatId) {
+            return readSealed(historyId(chatId), {});
+        }
+
         async function saveSession() {
             if (!session) {
                 return;
@@ -359,10 +464,19 @@
             }
 
             await saveSession();
+
+            // Remember which group this conversation uses. The welcome that
+            // carried it is consumed, so a reload cannot learn it again.
+            const recalled = await recallConversation(chatId);
+            const groupIdBase64 = joinedGroupId
+                ? toBase64(joinedGroupId)
+                : (recalled ? recalled.groupId : null);
+            await rememberConversation(chatId, groupIdBase64, { lastSequence });
+
             return {
                 lastSequence,
                 applied,
-                groupId: joinedGroupId ? toBase64(joinedGroupId) : null,
+                groupId: groupIdBase64,
             };
         }
 
@@ -463,8 +577,31 @@
             // Who each signature key belongs to, so authorship can come from the
             // protocol rather than from a column the server controls.
             const directory = await participantKeyIndex(chatId);
+            // What this device has opened before. An MLS application message
+            // decrypts once, so without this a reload loses the conversation.
+            const remembered = await recallOpened(chatId);
             const messages = [];
+            const toRemember = [];
             for (const envelope of response.envelopes) {
+                const previously = remembered[String(envelope.message_id)];
+                if (previously) {
+                    messages.push({
+                        messageId: envelope.message_id,
+                        senderId: previously.senderId,
+                        claimedSenderId: previously.claimedSenderId,
+                        senderDeviceId: null,
+                        senderKey: null,
+                        authorship: previously.authorship,
+                        createdAt: previously.createdAt || envelope.created_at,
+                        contentType: previously.contentType,
+                        readable: previously.text !== null || previously.attachment !== null,
+                        text: previously.text,
+                        attachment: previously.attachment,
+                        fromHistory: true,
+                    });
+                    continue;
+                }
+
                 let text = null;
                 let readable = true;
                 let senderKey = null;
@@ -501,7 +638,7 @@
                         text = null;
                     }
                 }
-                messages.push({
+                const message = {
                     messageId: envelope.message_id,
                     // The authenticated author where there is one; the claim is
                     // kept separately so a caller cannot confuse them.
@@ -515,11 +652,102 @@
                     readable,
                     text,
                     attachment,
-                });
+                    fromHistory: false,
+                };
+                messages.push(message);
+                if (readable) {
+                    toRemember.push(message);
+                }
             }
 
+            await rememberOpened(chatId, toRemember);
+            const highest = messages.reduce(
+                (top, message) => Math.max(top, Number(message.messageId) || 0),
+                0
+            );
+            if (highest > 0) {
+                await rememberConversation(chatId, groupIdBase64, { lastMessageId: highest });
+            }
             await saveSession();
             return messages;
+        }
+
+        /**
+         * Walk the directory's hash chain and check it against what we last saw.
+         *
+         * The chain existed from the start and **no client verified it**, which a
+         * review pointed out and the documentation had glossed. Verified here it
+         * does what it was built for: it catches a server that rewrites history
+         * it has already shown us. It is still not key transparency — a server
+         * that lies consistently to a client which has never seen the truth is
+         * not caught by any amount of chain walking — and the code says so rather
+         * than implying otherwise.
+         *
+         * `entryDigest = SHA-256(uint64 seq || previous || uint16 type || payload)`,
+         * matching `DeviceDirectory::entryDigest()`.
+         */
+        async function verifyDirectory() {
+            const head = await readSealed(directoryHeadId, { seq: 0, digest: null });
+            let previous = head.digest === null ? new Uint8Array(32) : fromBase64(head.digest);
+            let seq = head.seq;
+            let checked = 0;
+
+            for (let page = 0; page < 50; page++) {
+                const response = await post('api/chat.php', {
+                    action: 'get_directory_log',
+                    after_seq: seq,
+                    limit: 200,
+                });
+                if (!response || response.success !== true) {
+                    throw new Error((response && response.message) || 'Could not read the device directory log');
+                }
+                const entries = response.entries || [];
+                if (entries.length === 0) {
+                    break;
+                }
+
+                for (const entry of entries) {
+                    if (Number(entry.seq) !== seq + 1) {
+                        throw new Error('The device directory has a gap at entry ' + entry.seq);
+                    }
+                    const claimedPrevious = fromBase64(entry.previous_digest);
+                    if (toBase64(claimedPrevious) !== toBase64(previous)) {
+                        throw new Error(
+                            'The device directory does not continue from what this device already saw: ' +
+                            'entry ' + entry.seq + ' names a different history'
+                        );
+                    }
+
+                    const expected = await directoryEntryDigest(
+                        Number(entry.seq),
+                        claimedPrevious,
+                        Number(entry.entry_type),
+                        fromBase64(entry.payload_digest)
+                    );
+                    if (toBase64(expected) !== entry.entry_digest) {
+                        throw new Error('The device directory entry ' + entry.seq + ' does not match its digest');
+                    }
+
+                    previous = expected;
+                    seq = Number(entry.seq);
+                    checked++;
+                }
+            }
+
+            await writeSealed(directoryHeadId, { seq, digest: toBase64(previous) });
+            return { verified: checked, head: seq };
+        }
+
+        async function directoryEntryDigest(seq, previous, entryType, payloadDigest) {
+            const input = new Uint8Array(8 + previous.length + 2 + payloadDigest.length);
+            // uint64 big-endian, the way PHP's pack('J') writes it.
+            const view = new DataView(input.buffer);
+            view.setUint32(0, Math.floor(seq / 0x100000000));
+            view.setUint32(4, seq >>> 0);
+            input.set(previous, 8);
+            view.setUint16(8 + previous.length, entryType);
+            input.set(payloadDigest, 8 + previous.length + 2);
+            return new Uint8Array(await subtle.digest('SHA-256', input));
         }
 
         /**
@@ -884,7 +1112,7 @@
             return { epoch: where.epoch };
         }
 
-        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked };
+        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked, recallConversation, rememberConversation, verifyDirectory };
     }
 
     /**

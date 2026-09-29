@@ -71,6 +71,16 @@ function fakeClient(options) {
             return { removed: [] };
         },
         sendingBlocked: () => options.sendingBlocked || null,
+        verifyDirectory: async () => {
+            state.directoryChecks = (state.directoryChecks || 0) + 1;
+            if (options.directoryFails === true) {
+                throw new Error('the directory does not continue from what this device saw');
+            }
+            return { verified: 1, head: 1 };
+        },
+        recallConversation: async (chatId) => (options.recalled
+            ? Object.assign({ groupId: 'group-for-' + chatId, lastSequence: 3, lastMessageId: 9 }, options.recalled)
+            : null),
     };
 }
 
@@ -251,6 +261,38 @@ function fakeClient(options) {
             'sending is refused after a fork');
         assert.equal(client.state.sent.length, 0, 'nothing was sent');
         console.log('PASS: a forked conversation refuses to send');
+    }
+
+    // ---- a fresh page finds a conversation it is already in ----------------
+
+    {
+        const doc = fakeDocument([]);
+        doc.markChatProtected(42, true);
+        // `joined: false` means the server has no welcome left to replay, which
+        // is exactly the situation after a reload.
+        const client = fakeClient({ enrolled: true, joined: false, recalled: {} });
+        const ui = makeUi(doc, client);
+
+        const groupId = await ui.adoptConversation(42);
+        assert.equal(groupId, 'group-for-42',
+            'a reloaded page recovers the group from the sealed local record');
+        console.log('PASS: a reload rejoins a conversation whose welcome is long gone');
+    }
+
+    {
+        const notices = [];
+        const doc = fakeDocument([]);
+        doc.markChatProtected(42, true);
+        const client = fakeClient({ enrolled: true, directoryFails: true });
+        const ui = makeUi(doc, client, (message) => notices.push(message));
+
+        await ui.adoptConversation(42);
+        assert.ok(client.state.directoryChecks >= 1, 'the directory chain is checked when a conversation opens');
+        await assert.rejects(() => ui.send(42, 'while the directory disagrees'), /directory/,
+            'sending is refused while the directory does not match what this device saw');
+        assert.ok(notices.some((line) => /safety numbers/.test(line)),
+            'and the person is told to compare safety numbers');
+        console.log('PASS: a rewritten directory blocks sending and says why');
     }
 
     console.log('Protected interface runtime tests passed.');

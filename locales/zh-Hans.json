@@ -879,6 +879,7 @@
     "api.protection_state_unknown_edit": "无法确认这个会话是否已加密；没有更改任何内容。",
     "protected.rejoin_required": "需要重新加入这个会话，才能继续发送内容。",
     "protected.author_mismatch": "这条消息的签名账户与显示的账户不一致。",
-    "protected.author_unverified": "无法验证这条消息的发送者。"
+    "protected.author_unverified": "无法验证这条消息的发送者。",
+    "protected.directory_changed": "设备目录与本设备此前看到的不一致。请先核对安全码再继续。"
   }
 }

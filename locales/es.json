@@ -879,6 +879,7 @@
     "api.protection_state_unknown_edit": "No se pudo comprobar si esta conversación está cifrada; no se cambió nada.",
     "protected.rejoin_required": "Hay que volver a unirse a esta conversación antes de enviar algo más.",
     "protected.author_mismatch": "Este mensaje fue firmado por una cuenta distinta de la que se muestra.",
-    "protected.author_unverified": "No se pudo verificar quién envió este mensaje."
+    "protected.author_unverified": "No se pudo verificar quién envió este mensaje.",
+    "protected.directory_changed": "El directorio de dispositivos no coincide con lo que este dispositivo vio antes. Comparen los números de seguridad antes de continuar."
   }
 }

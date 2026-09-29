@@ -99,7 +99,25 @@
             if (!(await active.resume())) {
                 return null;
             }
-            const known = conversations.get(chatId);
+            // After a reload the page-local map is empty, but the client kept
+            // what it needs sealed on the device: which group this conversation
+            // uses and how far it had read. Without this the interface could not
+            // rejoin a conversation it was already in, because the welcome that
+            // carried the group id has long since been consumed.
+            let known = conversations.get(chatId);
+            if (!known) {
+                const recalled = await active.recallConversation(chatId);
+                if (recalled) {
+                    known = {
+                        groupId: recalled.groupId,
+                        lastSequence: recalled.lastSequence || 0,
+                        lastMessageId: recalled.lastMessageId || 0,
+                        opened: new Map(),
+                    };
+                    conversations.set(chatId, known);
+                }
+            }
+
             const sync = await active.syncGroup(chatId, known ? known.lastSequence || 0 : 0);
             if (!sync.groupId && !known) {
                 return null;
@@ -118,6 +136,19 @@
             // check also blocks sending, because a pending removal is exactly
             // when one should not keep talking.
             if (record.groupId) {
+                try {
+                    // The directory's own hash chain, checked against what this
+                    // device last saw. A server that rewrites history it has
+                    // already shown is caught here; one that has always lied to
+                    // this device is not, which is why the safety number exists.
+                    await active.verifyDirectory();
+                    record.directoryCheckFailed = false;
+                } catch (error) {
+                    record.directoryCheckFailed = true;
+                    notify(translate('protected.directory_changed',
+                        'The device directory does not match what this device saw before. Compare safety numbers before continuing.'));
+                }
+
                 try {
                     await active.enforceRevocations(chatId, record.groupId);
                     record.revocationCheckFailed = false;
@@ -151,6 +182,10 @@
             if (record && record.revocationCheckFailed === true) {
                 throw new Error(translate('protected.revocation_check_failed',
                     'Could not check whether a revoked device is still in this conversation.'));
+            }
+            if (record && record.directoryCheckFailed === true) {
+                throw new Error(translate('protected.directory_changed',
+                    'The device directory does not match what this device saw before. Compare safety numbers before continuing.'));
             }
             const blocked = client.sendingBlocked(chatId, groupId);
             if (blocked) {

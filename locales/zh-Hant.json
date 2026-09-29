@@ -879,6 +879,7 @@
     "api.protection_state_unknown_edit": "無法確認這個對話是否已加密；沒有變更任何內容。",
     "protected.rejoin_required": "需要重新加入這個對話，才能繼續傳送內容。",
     "protected.author_mismatch": "這則訊息的簽章帳戶與顯示的帳戶不一致。",
-    "protected.author_unverified": "無法驗證這則訊息的傳送者。"
+    "protected.author_unverified": "無法驗證這則訊息的傳送者。",
+    "protected.directory_changed": "裝置目錄與本裝置先前看到的不一致。請先核對安全碼再繼續。"
   }
 }

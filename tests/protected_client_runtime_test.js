@@ -40,6 +40,33 @@ function fakeServer() {
     let nextDeviceId = 1;
     let nextMessageId = 1;
     const seen = [];
+    // A hash chain shaped exactly like the server's, so the client's walk is
+    // tested against the real construction rather than a stub.
+    const directoryLog = [];
+    const crypto = require('node:crypto');
+    const appendDirectoryEntry = (entryType, payload) => {
+        const seq = directoryLog.length + 1;
+        const previous = directoryLog.length === 0
+            ? Buffer.alloc(32)
+            : Buffer.from(directoryLog[directoryLog.length - 1].entry_digest, 'base64');
+        const payloadDigest = crypto.createHash('sha256').update(payload).digest();
+        const seqBytes = Buffer.alloc(8);
+        seqBytes.writeUInt32BE(0, 0);
+        seqBytes.writeUInt32BE(seq, 4);
+        const typeBytes = Buffer.alloc(2);
+        typeBytes.writeUInt16BE(entryType, 0);
+        const entryDigest = crypto.createHash('sha256')
+            .update(Buffer.concat([seqBytes, previous, typeBytes, payloadDigest]))
+            .digest();
+        directoryLog.push({
+            seq,
+            entry_type: entryType,
+            previous_digest: previous.toString('base64'),
+            payload_digest: payloadDigest.toString('base64'),
+            entry_digest: entryDigest.toString('base64'),
+        });
+        return directoryLog[directoryLog.length - 1];
+    };
 
     async function post(url, body) {
         seen.push({ url, action: body.action });
@@ -56,6 +83,7 @@ function fakeServer() {
                 };
                 list.push(device);
                 devices.set(userId, list);
+                appendDirectoryEntry(1, Buffer.from(device.signatureKey, 'base64'));
                 return { success: true, device_id: device.deviceId, key_packages_stored: device.keyPackages.length };
             }
             case 'claim_key_packages': {
@@ -82,6 +110,10 @@ function fakeServer() {
                             : { device_id: device.deviceId, key_package: null, exhausted: true };
                     }),
                 };
+            }
+            case 'get_directory_log': {
+                const after = Number(body.after_seq || 0);
+                return { success: true, entries: directoryLog.filter((entry) => entry.seq > after) };
             }
             case 'list_participant_devices': {
                 // Every device of every participant, the way the real endpoint
@@ -150,7 +182,7 @@ function fakeServer() {
         }
     }
 
-    return { post, devices, envelopes, handshakes, seen, blobs };
+    return { post, devices, envelopes, handshakes, seen, blobs, directoryLog, appendDirectoryEntry };
 }
 
 (async () => {
@@ -308,6 +340,66 @@ function fakeServer() {
     assert.equal(numberAfter, await tablet.safetyNumber(tabletJoin.groupId),
         'every device computes the same safety number');
     console.log('PASS: the safety number agrees across all three devices');
+
+    // ---- the directory chain is actually verified ---------------------------
+    // The chain existed from the start and nothing checked it, which a review
+    // pointed out while the documentation implied clients could.
+
+    const firstWalk = await ada.verifyDirectory();
+    assert.ok(firstWalk.verified > 0, 'the chain is walked and entries are checked');
+    assert.equal(firstWalk.head, server.directoryLog.length, 'the walk reaches the head');
+
+    // Walking again from the stored head verifies nothing new and still agrees.
+    const secondWalk = await ada.verifyDirectory();
+    assert.equal(secondWalk.verified, 0, 'a second walk has nothing new to check');
+    assert.equal(secondWalk.head, firstWalk.head, 'and the head has not moved');
+    console.log('PASS: the directory chain is walked, and progress is remembered');
+
+    // A server that rewrites history it has already shown must be caught.
+    const rewritten = server.appendDirectoryEntry(1, Buffer.from('a device nobody enrolled'));
+    rewritten.previous_digest = Buffer.alloc(32).toString('base64');
+    await assert.rejects(() => ada.verifyDirectory(),
+        /different history|does not continue/,
+        'an entry that does not continue the history this device saw is refused');
+    console.log('PASS: a rewritten directory is caught by the client, not merely detectable in principle');
+
+    // Repair the log so later cases are unaffected.
+    server.directoryLog.pop();
+
+    // ---- a reload keeps the conversation and its history -------------------
+    // Two things a review found a reload destroyed: the chat-to-group mapping,
+    // which only lived in a page-local Map while the welcome that carried it had
+    // already been consumed, and every message read before the reload, because
+    // an MLS application message decrypts exactly once.
+
+    const beforeReload = 'said before the tab closed';
+    const beforeSend = await ada.send(42, started.groupId, beforeReload);
+    const readBefore = await miraAgain.receive(42, sync.groupId, beforeSend.messageId - 1);
+    assert.ok(readBefore.some((message) => message.text === beforeReload),
+        'the message is read once while the page is open');
+
+    // A brand new client over the same store: this is what a reload gives you.
+    const afterReloadClient = build(2, miraStorage);
+    assert.equal(await afterReloadClient.resume(), true, 'the device resumes');
+
+    const recalled = await afterReloadClient.recallConversation(42);
+    assert.ok(recalled && recalled.groupId, 'the conversation remembers which group it uses');
+    assert.equal(recalled.groupId, sync.groupId, 'and it is the right one');
+
+    const historyAfterReload = await afterReloadClient.receive(42, recalled.groupId, beforeSend.messageId - 1);
+    const fromHistory = historyAfterReload.find((message) => message.messageId === beforeSend.messageId);
+    assert.ok(fromHistory, 'the message is still listed after the reload');
+    assert.equal(fromHistory.text, beforeReload,
+        'and is still readable, from the sealed local history rather than a second decryption');
+    assert.equal(fromHistory.fromHistory, true, 'the client says where it came from');
+    console.log('PASS: a reload keeps both the group mapping and the messages already read');
+
+    // That history is at rest as ciphertext, not as text.
+    const historyRecord = await miraStorage.get('history:2:42');
+    assert.ok(historyRecord && historyRecord.sealed.length > 0, 'the history is stored sealed');
+    assert.ok(!Buffer.from(historyRecord.sealed).includes(Buffer.from(beforeReload)),
+        'the stored history does not contain the message in the clear');
+    console.log('PASS: local history is sealed with the same non-extractable key');
 
     // ---- one browser, two accounts -----------------------------------------
     // The reviewer logged a second account into a store the first had used and
