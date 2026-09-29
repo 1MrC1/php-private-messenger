@@ -697,35 +697,74 @@
             const salt = randomBytes(16);
             const iv = randomBytes(12);
             const key = await deriveRecoveryKey(passphrase, salt);
+
+            // The header travels as authenticated data, not merely alongside the
+            // ciphertext. A review pointed out that the identity, the public key
+            // and the KDF parameters sat outside the AEAD, so they could be
+            // rewritten without the file failing to open.
+            const header = {
+                format: 'pm-recovery-v2',
+                kdf: 'PBKDF2-SHA512',
+                iterations: RECOVERY_ITERATIONS,
+                salt: toBase64(salt),
+                iv: toBase64(iv),
+                identity: toBase64(identity),
+                signature_public_key: toBase64(signaturePublicKey),
+                account_id: accountId,
+            };
             const sealed = new Uint8Array(
-                await subtle.encrypt({ name: 'AES-GCM', iv }, key, session.export_state())
+                await subtle.encrypt(
+                    { name: 'AES-GCM', iv, additionalData: encoder.encode(canonicalHeader(header)) },
+                    key,
+                    session.export_state()
+                )
             );
 
             return {
                 passphrase,
-                file: {
-                    format: 'pm-recovery-v1',
-                    kdf: 'PBKDF2-SHA512',
-                    iterations: RECOVERY_ITERATIONS,
-                    salt: toBase64(salt),
-                    iv: toBase64(iv),
-                    identity: toBase64(identity),
-                    signature_public_key: toBase64(signaturePublicKey),
-                    state: toBase64(sealed),
-                },
+                file: Object.assign({}, header, { state: toBase64(sealed) }),
             };
         }
 
         /** Restore a device from a recovery file and its passphrase. */
         async function restoreFromRecoveryFile(file, passphrase) {
-            if (!file || file.format !== 'pm-recovery-v1') {
+            if (!file || file.format !== 'pm-recovery-v2') {
                 throw new Error('That is not a recovery file this version understands');
             }
-            const key = await deriveRecoveryKey(passphrase, fromBase64(file.salt), file.iterations);
+            if (file.kdf !== 'PBKDF2-SHA512') {
+                throw new Error('That recovery file uses a key derivation this version does not support');
+            }
+            // An attacker-chosen iteration count is a way to make a browser sit
+            // still for an hour. Bound it, and require at least what we write.
+            const iterations = Number(file.iterations);
+            if (!Number.isInteger(iterations) ||
+                iterations < RECOVERY_ITERATIONS ||
+                iterations > RECOVERY_ITERATIONS * 10) {
+                throw new Error('That recovery file declares an unusable key derivation cost');
+            }
+            if ((file.account_id ?? null) !== accountId) {
+                throw new Error('That recovery file belongs to a different account');
+            }
+
+            const header = {
+                format: file.format,
+                kdf: file.kdf,
+                iterations,
+                salt: file.salt,
+                iv: file.iv,
+                identity: file.identity,
+                signature_public_key: file.signature_public_key,
+                account_id: file.account_id ?? null,
+            };
+            const key = await deriveRecoveryKey(passphrase, fromBase64(file.salt), iterations);
             let plain;
             try {
                 plain = await subtle.decrypt(
-                    { name: 'AES-GCM', iv: fromBase64(file.iv) },
+                    {
+                        name: 'AES-GCM',
+                        iv: fromBase64(file.iv),
+                        additionalData: encoder.encode(canonicalHeader(header)),
+                    },
                     key,
                     fromBase64(file.state)
                 );
@@ -846,6 +885,23 @@
         }
 
         return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked };
+    }
+
+    /**
+     * The header exactly as it is authenticated: fixed field order, so the two
+     * sides cannot disagree about what was covered.
+     */
+    function canonicalHeader(header) {
+        return [
+            header.format,
+            header.kdf,
+            String(header.iterations),
+            header.salt,
+            header.iv,
+            header.identity,
+            header.signature_public_key,
+            header.account_id === null || header.account_id === undefined ? '' : String(header.account_id),
+        ].join('\n');
     }
 
     // ---- small helpers -----------------------------------------------------

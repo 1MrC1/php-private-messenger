@@ -68,44 +68,61 @@ final class EncryptedBlob
         if ($size < 1 || $size > self::MAX_BLOB_BYTES) {
             throw new ProtectedChatMismatch('That file is too large to send encrypted', 'blob_too_large');
         }
-        $this->assertWithinQuota($uploaderId, $size);
 
-        $root = dirname(__DIR__);
-        $directory = $root . '/' . self::DIRECTORY;
-        if (!is_dir($directory) && !@mkdir($directory, 0750, true) && !is_dir($directory)) {
-            throw new RuntimeException('Unable to prepare encrypted attachment storage');
+        // Counting outside a transaction let concurrent uploads all see the
+        // same total and all pass. The count and the insert now happen under one
+        // lock, and the file is written first so a failed insert can remove it.
+        $this->conn->begin_transaction();
+        $path = null;
+        try {
+            $this->assertWithinQuota($uploaderId, $size);
+
+            $root = dirname(__DIR__);
+            $directory = $root . '/' . self::DIRECTORY;
+            if (!is_dir($directory) && !@mkdir($directory, 0750, true) && !is_dir($directory)) {
+                throw new RuntimeException('Unable to prepare encrypted attachment storage');
+            }
+
+            // The name carries no information about the file: it cannot, because
+            // the server does not know anything about it.
+            $name = 'blob_' . bin2hex(random_bytes(16)) . '.bin';
+            $path = $directory . '/' . $name;
+            if (file_put_contents($path, $ciphertext, LOCK_EX) !== $size) {
+                @unlink($path);
+                $path = null;
+                throw new RuntimeException('Unable to store the encrypted attachment');
+            }
+            @chmod($path, 0640);
+
+            // Hash what is actually on disk, not what we were handed.
+            $digest = hash_file('sha256', $path, true);
+            if (!is_string($digest) || !hash_equals(hash('sha256', $ciphertext, true), $digest)) {
+                throw new RuntimeException('The stored attachment did not match what was sent');
+            }
+
+            $relative = self::DIRECTORY . '/' . $name;
+            $this->execute(
+                'INSERT INTO encrypted_blobs (uploader_id, chat_id, blob_path, byte_size, sha256)
+                 VALUES (?, ?, ?, ?, ?)',
+                'iisis',
+                [$uploaderId, $chatId, $relative, $size, $digest]
+            );
+            $blobId = (int)$this->conn->insert_id;
+            $this->conn->commit();
+
+            return [
+                'blob_id' => $blobId,
+                'byte_size' => $size,
+                'sha256' => base64_encode($digest),
+            ];
+        } catch (Throwable $error) {
+            $this->conn->rollback();
+            // A file with no row is an orphan nobody will ever fetch.
+            if ($path !== null && is_file($path)) {
+                @unlink($path);
+            }
+            throw $error;
         }
-
-        // The name carries no information about the file: it cannot, because
-        // the server does not know anything about it.
-        $name = 'blob_' . bin2hex(random_bytes(16)) . '.bin';
-        $path = $directory . '/' . $name;
-        if (file_put_contents($path, $ciphertext, LOCK_EX) !== $size) {
-            @unlink($path);
-            throw new RuntimeException('Unable to store the encrypted attachment');
-        }
-        @chmod($path, 0640);
-
-        // Hash what is actually on disk, not what we were handed.
-        $digest = hash_file('sha256', $path, true);
-        if (!is_string($digest) || !hash_equals(hash('sha256', $ciphertext, true), $digest)) {
-            @unlink($path);
-            throw new RuntimeException('The stored attachment did not match what was sent');
-        }
-
-        $relative = self::DIRECTORY . '/' . $name;
-        $this->execute(
-            'INSERT INTO encrypted_blobs (uploader_id, chat_id, blob_path, byte_size, sha256)
-             VALUES (?, ?, ?, ?, ?)',
-            'iisis',
-            [$uploaderId, $chatId, $relative, $size, $digest]
-        );
-
-        return [
-            'blob_id' => (int)$this->conn->insert_id,
-            'byte_size' => $size,
-            'sha256' => base64_encode($digest),
-        ];
     }
 
     /**
@@ -168,7 +185,8 @@ final class EncryptedBlob
         $rows = $this->select(
             'SELECT COUNT(*) AS uploads, COALESCE(SUM(byte_size), 0) AS bytes
              FROM encrypted_blobs
-             WHERE uploader_id = ? AND created_at >= (NOW() - INTERVAL 1 HOUR)',
+             WHERE uploader_id = ? AND created_at >= (NOW() - INTERVAL 1 HOUR)
+             FOR UPDATE',
             'i',
             [$uploaderId]
         );

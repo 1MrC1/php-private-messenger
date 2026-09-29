@@ -484,7 +484,7 @@ function fakeServer() {
     const recovery = await mira.createRecoveryFile();
     assert.match(recovery.passphrase, /^[a-z2-9]{6}(-[a-z2-9]{6}){3}$/,
         'the passphrase is generated, grouped and unambiguous');
-    assert.equal(recovery.file.format, 'pm-recovery-v1');
+    assert.equal(recovery.file.format, 'pm-recovery-v2');
     assert.ok(recovery.file.iterations >= 600000, 'the derivation is not cheap');
 
     // The file must not carry the state in the clear.
@@ -521,6 +521,35 @@ function fakeServer() {
         /not a recovery file/,
         'an unknown file format is refused'
     );
+
+    // The header is authenticated, so rewriting any of it fails to open rather
+    // than opening with different metadata.
+    const tamperedHeader = Object.assign({}, recovery.file, {
+        signature_public_key: Buffer.from('a key that was never ours').toString('base64'),
+    });
+    await assert.rejects(
+        () => build(2, memoryStorage()).restoreFromRecoveryFile(tamperedHeader, recovery.passphrase),
+        /does not open this recovery file/,
+        'rewriting the header breaks authentication instead of changing the metadata'
+    );
+
+    // An attacker-chosen derivation cost is a way to make a browser sit still.
+    await assert.rejects(
+        () => build(2, memoryStorage()).restoreFromRecoveryFile(
+            Object.assign({}, recovery.file, { iterations: 600000000 }),
+            recovery.passphrase
+        ),
+        /unusable key derivation cost/,
+        'an absurd iteration count is refused before any derivation starts'
+    );
+
+    // And a file from another account does not open here.
+    await assert.rejects(
+        () => build(3, memoryStorage()).restoreFromRecoveryFile(recovery.file, recovery.passphrase),
+        /different account/,
+        'a recovery file from another account is refused'
+    );
+    console.log('PASS: the recovery header is authenticated, bounded, and account-bound');
     console.log('PASS: a wrong passphrase and an unknown format are both refused');
 
     console.log('Protected client runtime tests passed.');
