@@ -36,6 +36,7 @@ services:
       - ./migrations/20260928_add_chat_protection_and_envelopes.sql:/docker-entrypoint-initdb.d/05-protected-chats.sql:ro
       - ./migrations/20260928_add_device_directory.sql:/docker-entrypoint-initdb.d/06-device-directory.sql:ro
       - ./migrations/20260928_add_encrypted_blobs.sql:/docker-entrypoint-initdb.d/07-encrypted-blobs.sql:ro
+      - ./migrations/20260929_enforce_protected_plaintext.sql:/docker-entrypoint-initdb.d/08-protected-invariant.sql:ro
       - db-data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root-development-only}"]
