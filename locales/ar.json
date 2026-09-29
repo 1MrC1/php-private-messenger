@@ -880,6 +880,21 @@
     "protected.rejoin_required": "يجب الانضمام إلى هذه المحادثة من جديد قبل إرسال أي شيء آخر.",
     "protected.author_mismatch": "وُقِّعت هذه الرسالة بحساب مختلف عن الحساب المعروض.",
     "protected.author_unverified": "لم نتمكّن من التحقّق من مُرسل هذه الرسالة.",
-    "protected.directory_changed": "دليل الأجهزة لا يطابق ما رآه هذا الجهاز سابقًا. قارِنوا أرقام الأمان قبل المتابعة."
+    "protected.directory_changed": "دليل الأجهزة لا يطابق ما رآه هذا الجهاز سابقًا. قارِنوا أرقام الأمان قبل المتابعة.",
+    "protected.recovery_title": "استعادة المحادثات المحمية",
+    "protected.recovery_subtitle": "احفظ مفاتيح التشفير لهذا الجهاز أو استعدها",
+    "protected.recovery_explainer": "يتيح لك ملف الاستعادة قراءة محادثاتك المحمية على جهاز بديل. وهو مشفَّر بعبارة مرور تُنشئها هذه الصفحة؛ احفظ الاثنين، واحفظهما منفصلين.",
+    "protected.recovery_download": "تنزيل ملف استعادة",
+    "protected.recovery_passphrase_label": "اكتب عبارة المرور هذه الآن. فهي غير محفوظة في أي مكان ولا يمكن إظهارها مرة أخرى.",
+    "protected.recovery_restore_explainer": "الاستعادة تستبدل مفاتيح هذا الجهاز بالمفاتيح الموجودة في الملف.",
+    "protected.recovery_file_label": "ملف الاستعادة",
+    "protected.recovery_passphrase_input": "عبارة المرور الخاصة به",
+    "protected.recovery_restore": "استعادة هذا الجهاز",
+    "protected.recovery_needs_both": "اختر ملف الاستعادة واكتب عبارة المرور الخاصة به.",
+    "protected.recovery_restored": "تمت استعادة هذا الجهاز من ملف الاستعادة.",
+    "protected.recovery_unreadable": "هذا الملف ليس ملف استعادة يفهمه هذا الإصدار",
+    "protected.not_enrolled": "لم يُهيَّأ هذا الجهاز بعد للمحادثات المحمية",
+    "protected.admit_failed": "لم يتمكّن أحد أجهزة الحساب الآخر من الانضمام إلى هذه المحادثة.",
+    "protected.attachment": "ملف مشفَّر"
   }
 }

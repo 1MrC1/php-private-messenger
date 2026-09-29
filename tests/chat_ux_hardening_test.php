@@ -275,10 +275,50 @@ chatUxAssert(
 );
 
 chatUxAssert(
-    substr_count($index, 'v=20260929.1') === 12 &&
-        str_contains($index, 'assets/js/i18n.js?v=20260929.1') &&
-        str_contains($index, 'assets/js/chat-ux.js?v=20260929.1'),
+    substr_count($index, 'v=20260929.2') === 12 &&
+        str_contains($index, 'assets/js/i18n.js?v=20260929.2') &&
+        str_contains($index, 'assets/js/chat-ux.js?v=20260929.2'),
     'all first-party frontend layers deploy under one cache key'
+);
+
+// ---- the protected helpers must be reachable from the interface ------------
+// A review found sendAttachment, openAttachment, admitDevices and the recovery
+// pair existing in the client with nothing calling them, while the documentation
+// described them as shipped. These pin the wiring that makes them reachable.
+
+$protectedUi = (string)file_get_contents(__DIR__ . '/../assets/js/protected-ui.js');
+foreach ([
+    'window.handleFileSelect' => 'a file chosen in a protected conversation is encrypted instead of uploaded',
+    'window.pmShowRecoveryDialog' => 'the recovery dialog can be opened',
+    'window.pmDownloadRecoveryFile' => 'a recovery file can be downloaded',
+    'window.pmRestoreFromRecoveryFile' => 'a device can be restored from one',
+    'admitNewDevices(' => 'devices enrolled later are admitted',
+    'protected-attachment' => 'an encrypted attachment is rendered as something openable',
+] as $needle => $why) {
+    chatUxAssert(str_contains($protectedUi, $needle), $why);
+}
+
+$events = (string)file_get_contents(__DIR__ . '/../assets/js/csp-events.js');
+foreach (['protected-recovery', 'protected-recovery-download', 'protected-recovery-restore'] as $action) {
+    chatUxAssert(
+        str_contains($events, "'" . $action . "'"),
+        'the action is bound externally rather than inline: ' . $action
+    );
+}
+
+$markup = (string)file_get_contents(__DIR__ . '/../index.html');
+foreach ([
+    'id="protectedRecoveryModal"',
+    'data-pm-action="protected-recovery"',
+    'data-pm-action="protected-recovery-download"',
+    'data-pm-action="protected-recovery-restore"',
+    'id="protectedRecoveryPassphrase"',
+] as $needle) {
+    chatUxAssert(str_contains($markup, $needle), 'the recovery interface is present: ' . $needle);
+}
+chatUxAssert(
+    !preg_match('/<[^>]*\son[a-z]+=/i', $markup),
+    'none of it uses an inline handler, which the policy denies'
 );
 
 echo "Chat UX hardening tests passed.\n";

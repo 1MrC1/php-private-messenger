@@ -71,6 +71,25 @@ function fakeClient(options) {
             return { removed: [] };
         },
         sendingBlocked: () => options.sendingBlocked || null,
+        participants: async () => options.participants || [],
+        sendAttachment: async (chatId, groupId, name, bytes) => {
+            state.attachments = state.attachments || [];
+            state.attachments.push({ chatId, groupId, name, size: bytes.length });
+            return { messageId: 21, blobId: 5 };
+        },
+        openAttachment: async (descriptor) => ({ name: descriptor.name, bytes: new Uint8Array([1, 2, 3]) }),
+        createRecoveryFile: async () => ({
+            passphrase: 'abcdef-ghijkm-npqrst-uvwxyz',
+            file: { format: 'pm-recovery-v2' },
+        }),
+        restoreFromRecoveryFile: async (file, passphrase) => {
+            state.restored = { file, passphrase };
+            return true;
+        },
+        admitDevices: async () => {
+            state.admissions = (state.admissions || 0) + 1;
+            return { admitted: 0, skipped: 1 };
+        },
         verifyDirectory: async () => {
             state.directoryChecks = (state.directoryChecks || 0) + 1;
             if (options.directoryFails === true) {
@@ -293,6 +312,42 @@ function fakeClient(options) {
         assert.ok(notices.some((line) => /safety numbers/.test(line)),
             'and the person is told to compare safety numbers');
         console.log('PASS: a rewritten directory blocks sending and says why');
+    }
+
+    // ---- the helpers a review found unreachable are reachable --------------
+    // sendAttachment, openAttachment, admitDevices and the recovery pair all
+    // existed in the client with nothing calling them.
+
+    {
+        const doc = fakeDocument([]);
+        doc.markChatProtected(42, true);
+        const client = fakeClient({ enrolled: true, participants: [1, 2] });
+        const ui = makeUi(doc, client);
+
+        await ui.sendAttachment(42, {
+            name: 'score.pdf',
+            arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer,
+        });
+        assert.equal(client.state.attachments.length, 1, 'a file in a protected chat goes through the client');
+        assert.equal(client.state.attachments[0].name, 'score.pdf', 'with its name');
+        assert.equal(client.state.attachments[0].size, 4, 'and its bytes');
+        console.log('PASS: attachments in a protected conversation are encrypted by the client');
+
+        // Opening a conversation admits devices the other account enrolled later.
+        await ui.adoptConversation(42);
+        assert.ok(client.state.admissions >= 1,
+            'opening a conversation admits any device the other account enrolled since');
+        console.log('PASS: a device enrolled later is admitted when the conversation is opened');
+
+        const recovery = await ui.downloadRecoveryFile();
+        assert.match(recovery.passphrase, /^[a-z2-9]{6}(-[a-z2-9]{6}){3}$/,
+            'the recovery file comes back with its generated passphrase');
+        console.log('PASS: a recovery file can be produced from the interface');
+
+        await ui.restoreFromFile({ text: async () => '{"format":"pm-recovery-v2"}' }, '  spaced-passphrase  ');
+        assert.equal(client.state.restored.passphrase, 'spaced-passphrase',
+            'restoring trims what was typed and passes the parsed file');
+        console.log('PASS: a recovery file can be restored from the interface');
     }
 
     console.log('Protected interface runtime tests passed.');

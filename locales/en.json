@@ -880,6 +880,21 @@
     "protected.rejoin_required": "This conversation has to be rejoined before anything else is sent.",
     "protected.author_mismatch": "This message was signed by a different account than the one shown.",
     "protected.author_unverified": "The sender of this message could not be verified.",
-    "protected.directory_changed": "The device directory does not match what this device saw before. Compare safety numbers before continuing."
+    "protected.directory_changed": "The device directory does not match what this device saw before. Compare safety numbers before continuing.",
+    "protected.recovery_title": "Protected conversation recovery",
+    "protected.recovery_subtitle": "Save or restore this device's encryption keys",
+    "protected.recovery_explainer": "A recovery file lets you read your protected conversations on a replacement device. It is encrypted with a passphrase this page generates; keep both, and keep them apart.",
+    "protected.recovery_download": "Download a recovery file",
+    "protected.recovery_passphrase_label": "Write this passphrase down now. It is not stored anywhere and cannot be shown again.",
+    "protected.recovery_restore_explainer": "Restoring replaces this device's keys with the ones in the file.",
+    "protected.recovery_file_label": "Recovery file",
+    "protected.recovery_passphrase_input": "Its passphrase",
+    "protected.recovery_restore": "Restore this device",
+    "protected.recovery_needs_both": "Choose the recovery file and type its passphrase.",
+    "protected.recovery_restored": "This device was restored from the recovery file.",
+    "protected.recovery_unreadable": "That file is not a recovery file this version understands",
+    "protected.not_enrolled": "This device is not set up for protected conversations yet",
+    "protected.admit_failed": "A device of the other account could not be added to this conversation.",
+    "protected.attachment": "Encrypted file"
   }
 }

@@ -880,6 +880,21 @@
     "protected.rejoin_required": "Hay que volver a unirse a esta conversación antes de enviar algo más.",
     "protected.author_mismatch": "Este mensaje fue firmado por una cuenta distinta de la que se muestra.",
     "protected.author_unverified": "No se pudo verificar quién envió este mensaje.",
-    "protected.directory_changed": "El directorio de dispositivos no coincide con lo que este dispositivo vio antes. Comparen los números de seguridad antes de continuar."
+    "protected.directory_changed": "El directorio de dispositivos no coincide con lo que este dispositivo vio antes. Comparen los números de seguridad antes de continuar.",
+    "protected.recovery_title": "Recuperación de conversaciones protegidas",
+    "protected.recovery_subtitle": "Guarda o restaura las claves de cifrado de este dispositivo",
+    "protected.recovery_explainer": "Un archivo de recuperación te permite leer tus conversaciones protegidas en un dispositivo de reemplazo. Está cifrado con una frase de contraseña que genera esta página; guarda ambos, y guárdalos por separado.",
+    "protected.recovery_download": "Descargar un archivo de recuperación",
+    "protected.recovery_passphrase_label": "Apunta esta frase de contraseña ahora. No se guarda en ningún sitio y no se puede volver a mostrar.",
+    "protected.recovery_restore_explainer": "Restaurar sustituye las claves de este dispositivo por las del archivo.",
+    "protected.recovery_file_label": "Archivo de recuperación",
+    "protected.recovery_passphrase_input": "Su frase de contraseña",
+    "protected.recovery_restore": "Restaurar este dispositivo",
+    "protected.recovery_needs_both": "Elige el archivo de recuperación y escribe su frase de contraseña.",
+    "protected.recovery_restored": "Este dispositivo se restauró desde el archivo de recuperación.",
+    "protected.recovery_unreadable": "Ese archivo no es un archivo de recuperación que esta versión entienda",
+    "protected.not_enrolled": "Este dispositivo aún no está configurado para conversaciones protegidas",
+    "protected.admit_failed": "No se pudo añadir a esta conversación un dispositivo de la otra cuenta.",
+    "protected.attachment": "Archivo cifrado"
   }
 }

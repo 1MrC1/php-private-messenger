@@ -22,6 +22,12 @@
     const changeActions = new Set(['toggle-2fa', 'update-setting', 'update-theme-setting']);
 
     const actions = Object.freeze({
+        // Protected conversations: the recovery file. These call into the
+        // protected interface rather than the legacy globals, and do nothing at
+        // all when the encryption layer is not installed.
+        'protected-recovery': function () { invoke('pmShowRecoveryDialog'); },
+        'protected-recovery-download': function () { invoke('pmDownloadRecoveryFile'); },
+        'protected-recovery-restore': function () { invoke('pmRestoreFromRecoveryFile'); },
         'chat-home': function () { invoke('showChatHome'); },
         'toggle-theme': function () { invoke('toggleAppTheme'); },
         'new-chat': function () { invoke('showNewChatModal'); },

@@ -880,6 +880,21 @@
     "protected.rejoin_required": "需要重新加入这个会话，才能继续发送内容。",
     "protected.author_mismatch": "这条消息的签名账户与显示的账户不一致。",
     "protected.author_unverified": "无法验证这条消息的发送者。",
-    "protected.directory_changed": "设备目录与本设备此前看到的不一致。请先核对安全码再继续。"
+    "protected.directory_changed": "设备目录与本设备此前看到的不一致。请先核对安全码再继续。",
+    "protected.recovery_title": "受保护会话的恢复",
+    "protected.recovery_subtitle": "保存或恢复本设备的加密密钥",
+    "protected.recovery_explainer": "恢复文件让你在替换设备上继续阅读受保护的会话。它用本页生成的口令加密；两者都要保存，并分开存放。",
+    "protected.recovery_download": "下载恢复文件",
+    "protected.recovery_passphrase_label": "请立刻记下这个口令。它不会被保存在任何地方，也无法再次显示。",
+    "protected.recovery_restore_explainer": "恢复会用文件中的密钥替换本设备的密钥。",
+    "protected.recovery_file_label": "恢复文件",
+    "protected.recovery_passphrase_input": "它的口令",
+    "protected.recovery_restore": "恢复本设备",
+    "protected.recovery_needs_both": "请选择恢复文件并输入它的口令。",
+    "protected.recovery_restored": "本设备已从恢复文件恢复。",
+    "protected.recovery_unreadable": "该文件不是这个版本能识别的恢复文件",
+    "protected.not_enrolled": "本设备尚未为受保护会话完成设置",
+    "protected.admit_failed": "对方账户的某台设备无法加入这个会话。",
+    "protected.attachment": "加密文件"
   }
 }

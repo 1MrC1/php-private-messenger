@@ -880,6 +880,21 @@
     "protected.rejoin_required": "需要重新加入這個對話，才能繼續傳送內容。",
     "protected.author_mismatch": "這則訊息的簽章帳戶與顯示的帳戶不一致。",
     "protected.author_unverified": "無法驗證這則訊息的傳送者。",
-    "protected.directory_changed": "裝置目錄與本裝置先前看到的不一致。請先核對安全碼再繼續。"
+    "protected.directory_changed": "裝置目錄與本裝置先前看到的不一致。請先核對安全碼再繼續。",
+    "protected.recovery_title": "受保護對話的復原",
+    "protected.recovery_subtitle": "儲存或復原本裝置的加密金鑰",
+    "protected.recovery_explainer": "復原檔案讓你在替換裝置上繼續閱讀受保護的對話。它以本頁產生的密語加密；兩者都要保存，並分開存放。",
+    "protected.recovery_download": "下載復原檔案",
+    "protected.recovery_passphrase_label": "請立刻記下這個密語。它不會被保存在任何地方，也無法再次顯示。",
+    "protected.recovery_restore_explainer": "復原會以檔案中的金鑰替換本裝置的金鑰。",
+    "protected.recovery_file_label": "復原檔案",
+    "protected.recovery_passphrase_input": "它的密語",
+    "protected.recovery_restore": "復原本裝置",
+    "protected.recovery_needs_both": "請選擇復原檔案並輸入它的密語。",
+    "protected.recovery_restored": "本裝置已從復原檔案復原。",
+    "protected.recovery_unreadable": "該檔案不是這個版本能識別的復原檔案",
+    "protected.not_enrolled": "本裝置尚未為受保護對話完成設定",
+    "protected.admit_failed": "對方帳戶的某台裝置無法加入這個對話。",
+    "protected.attachment": "加密檔案"
   }
 }

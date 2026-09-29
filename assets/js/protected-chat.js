@@ -676,6 +676,19 @@
         }
 
         /**
+         * The other accounts in a conversation, from the server's own participant
+         * device listing rather than from the page.
+         */
+        async function participants(chatId) {
+            const index = await participantKeyIndex(chatId);
+            const ids = new Set();
+            for (const device of index.values()) {
+                ids.add(device.userId);
+            }
+            return Array.from(ids);
+        }
+
+        /**
          * Walk the directory's hash chain and check it against what we last saw.
          *
          * The chain existed from the start and **no client verified it**, which a
@@ -1120,7 +1133,7 @@
             return { epoch: where.epoch };
         }
 
-        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked, recallConversation, rememberConversation, verifyDirectory };
+        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked, recallConversation, rememberConversation, verifyDirectory, participants };
     }
 
     /** A retry identifier: a UUID the server uses to recognise the same send. */

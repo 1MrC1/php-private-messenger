@@ -8,11 +8,11 @@
     <title>Messenger - Instant Messaging</title>
 
     <!-- Bootstrap CSS -->
-    <link href="assets/vendor/css/bootstrap.min.css?v=20260929.1" rel="stylesheet">
+    <link href="assets/vendor/css/bootstrap.min.css?v=20260929.2" rel="stylesheet">
     <!-- Font Awesome for icons -->
-    <link href="assets/vendor/css/fontawesome.min.css?v=20260929.1" rel="stylesheet">
+    <link href="assets/vendor/css/fontawesome.min.css?v=20260929.2" rel="stylesheet">
 
-    <link href="assets/css/style.css?v=20260929.1" rel="stylesheet">
+    <link href="assets/css/style.css?v=20260929.2" rel="stylesheet">
 
 
 </head>
@@ -143,6 +143,19 @@
                 <div class="settings-info">
                     <div class="settings-title">Account</div>
                     <div class="settings-description">Password, security settings</div>
+                </div>
+                <div class="settings-arrow">
+                    <i class="fas fa-chevron-right"></i>
+                </div>
+            </div>
+
+            <div class="settings-item" data-pm-action="protected-recovery" role="button" tabindex="0">
+                <div class="settings-icon settings-icon-account">
+                    <i class="fas fa-key"></i>
+                </div>
+                <div class="settings-info">
+                    <div class="settings-title" data-i18n="protected.recovery_title">Protected conversation recovery</div>
+                    <div class="settings-description" data-i18n="protected.recovery_subtitle">Save or restore this device's encryption keys</div>
                 </div>
                 <div class="settings-arrow">
                     <i class="fas fa-chevron-right"></i>
@@ -928,6 +941,32 @@
         </div>
     </div>
 </div>
+<div class="modal fade" id="protectedRecoveryModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" data-i18n="protected.recovery_title">Protected conversation recovery</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p data-i18n="protected.recovery_explainer">A recovery file lets you read your protected conversations on a replacement device. It is encrypted with a passphrase this page generates; keep both, and keep them apart.</p>
+                <button type="button" class="btn btn-primary mb-3" data-pm-action="protected-recovery-download" data-i18n="protected.recovery_download">Download a recovery file</button>
+                <div id="protectedRecoveryResult" hidden>
+                    <p data-i18n="protected.recovery_passphrase_label">Write this passphrase down now. It is not stored anywhere and cannot be shown again.</p>
+                    <code id="protectedRecoveryPassphrase" class="protected-passphrase"></code>
+                </div>
+                <hr>
+                <p data-i18n="protected.recovery_restore_explainer">Restoring replaces this device's keys with the ones in the file.</p>
+                <label class="form-label" for="protectedRecoveryFile" data-i18n="protected.recovery_file_label">Recovery file</label>
+                <input type="file" class="form-control mb-3" id="protectedRecoveryFile" accept="application/json">
+                <label class="form-label" for="protectedRestorePassphrase" data-i18n="protected.recovery_passphrase_input">Its passphrase</label>
+                <input type="text" class="form-control mb-3" id="protectedRestorePassphrase" autocomplete="off" spellcheck="false">
+                <button type="button" class="btn btn-secondary" data-pm-action="protected-recovery-restore" data-i18n="protected.recovery_restore">Restore this device</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="protectedEnrollModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -972,17 +1011,17 @@
     </button>
 </nav>
 <!-- Bootstrap JS -->
-<script src="assets/vendor/js/bootstrap.bundle.min.js?v=20260929.1"></script>
+<script src="assets/vendor/js/bootstrap.bundle.min.js?v=20260929.2"></script>
 
-<script src="assets/js/i18n.js?v=20260929.1" data-cfasync="false"></script>
-<script src="assets/js/script-ori_2025-06-07_02.js?v=20260929.1" data-cfasync="false"></script>
-<script src="assets/js/security-hardening.js?v=20260929.1" data-cfasync="false"></script>
-<script src="assets/js/ui-enhancements.js?v=20260929.1" data-cfasync="false"></script>
-<script src="assets/js/csp-events.js?v=20260929.1" data-cfasync="false"></script>
-<script src="assets/js/chat-ux.js?v=20260929.1" data-cfasync="false"></script>
+<script src="assets/js/i18n.js?v=20260929.2" data-cfasync="false"></script>
+<script src="assets/js/script-ori_2025-06-07_02.js?v=20260929.2" data-cfasync="false"></script>
+<script src="assets/js/security-hardening.js?v=20260929.2" data-cfasync="false"></script>
+<script src="assets/js/ui-enhancements.js?v=20260929.2" data-cfasync="false"></script>
+<script src="assets/js/csp-events.js?v=20260929.2" data-cfasync="false"></script>
+<script src="assets/js/chat-ux.js?v=20260929.2" data-cfasync="false"></script>
 <!-- Protected conversations: defines window.PmProtected; nothing runs until a
      caller uses it, and there is no interface for it yet. -->
-<script src="assets/js/protected-chat.js?v=20260929.1" data-cfasync="false"></script>
-<script src="assets/js/protected-ui.js?v=20260929.1" data-cfasync="false"></script>
+<script src="assets/js/protected-chat.js?v=20260929.2" data-cfasync="false"></script>
+<script src="assets/js/protected-ui.js?v=20260929.2" data-cfasync="false"></script>
 </body>
 </html>

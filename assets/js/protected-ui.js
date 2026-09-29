@@ -149,6 +149,21 @@
                         'The device directory does not match what this device saw before. Compare safety numbers before continuing.'));
                 }
 
+                // A device the other account enrolled after this conversation
+                // started has to be admitted or that person reads on one device
+                // and not another.
+                try {
+                    const mine = Number(currentAccountId());
+                    const others = (await active.participants(chatId))
+                        .filter((userId) => userId !== mine);
+                    if (others.length > 0) {
+                        await admitNewDevices(chatId, record.groupId, others);
+                    }
+                } catch (error) {
+                    notify(translate('protected.admit_failed',
+                        'A device of the other account could not be added to this conversation.'));
+                }
+
                 try {
                     await active.enforceRevocations(chatId, record.groupId);
                     record.revocationCheckFailed = false;
@@ -159,6 +174,12 @@
                 }
             }
             return record.groupId;
+        }
+
+        function currentAccountId() {
+            return adapters.accountId !== undefined
+                ? adapters.accountId
+                : (typeof window === 'object' && window ? window.currentUserId : null);
         }
 
         function isProtected(chatId) {
@@ -194,6 +215,115 @@
                 throw new Error(blocked);
             }
             return client.send(chatId, groupId, text);
+        }
+
+        /**
+         * Send a file into a protected conversation.
+         *
+         * The bytes are encrypted here and the server stores ciphertext it
+         * cannot scan, which is why the banner says so in every language.
+         */
+        async function sendAttachment(chatId, file) {
+            const groupId = await adoptConversation(chatId);
+            if (!groupId) {
+                throw new Error(translate('protected.not_joined',
+                    'This device has not joined that protected conversation yet'));
+            }
+            const client = await ensureClient();
+            const blocked = client.sendingBlocked(chatId, groupId);
+            if (blocked) {
+                throw new Error(blocked);
+            }
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            return client.sendAttachment(chatId, groupId, file.name, bytes);
+        }
+
+        /** Decrypt an attachment and hand it to the person as a download. */
+        async function openAttachment(descriptor) {
+            const client = await ensureClient();
+            const opened = await client.openAttachment(descriptor);
+            if (typeof doc.createElement !== 'function' || typeof URL === 'undefined') {
+                return opened;
+            }
+            const url = URL.createObjectURL(new Blob([opened.bytes], { type: 'application/octet-stream' }));
+            const link = doc.createElement('a');
+            link.href = url;
+            link.download = opened.name || 'attachment';
+            link.rel = 'noopener';
+            if (doc.body && typeof doc.body.appendChild === 'function') {
+                doc.body.appendChild(link);
+                link.click();
+                doc.body.removeChild(link);
+            }
+            // Revoked on the next turn: the click has to have happened first.
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+            return opened;
+        }
+
+        /**
+         * Admit any device of the other participants that is not in the group.
+         *
+         * A device enrolled after a conversation started would otherwise never
+         * be able to read it, and `admitDevices()` had no caller at all. Run when
+         * a conversation opens, and quiet when there is nothing to do.
+         */
+        async function admitNewDevices(chatId, groupId, otherUserIds) {
+            const client = await ensureClient();
+            let admitted = 0;
+            for (const userId of otherUserIds) {
+                try {
+                    const result = await client.admitDevices(chatId, groupId, userId);
+                    admitted += result.admitted || 0;
+                } catch (error) {
+                    // A device with no key packages left, or a key that does not
+                    // match its enrolment, must be visible rather than silently
+                    // excluded: the other person would simply never see messages.
+                    notify(translate('protected.admit_failed',
+                        'A device of the other account could not be added to this conversation.'));
+                }
+            }
+            return admitted;
+        }
+
+        /** Produce a recovery file and hand it to the person with its passphrase. */
+        async function downloadRecoveryFile() {
+            const client = await ensureClient();
+            if (!(await client.resume())) {
+                throw new Error(translate('protected.not_enrolled',
+                    'This device is not set up for protected conversations yet'));
+            }
+            const recovery = await client.createRecoveryFile();
+            if (typeof doc.createElement === 'function' && typeof URL !== 'undefined') {
+                const url = URL.createObjectURL(new Blob(
+                    [JSON.stringify(recovery.file, null, 2)],
+                    { type: 'application/json' }
+                ));
+                const link = doc.createElement('a');
+                link.href = url;
+                link.download = 'protected-conversations-recovery.json';
+                link.rel = 'noopener';
+                if (doc.body && typeof doc.body.appendChild === 'function') {
+                    doc.body.appendChild(link);
+                    link.click();
+                    doc.body.removeChild(link);
+                }
+                setTimeout(() => URL.revokeObjectURL(url), 0);
+            }
+            return recovery;
+        }
+
+        /** Restore this device from a recovery file the person chose. */
+        async function restoreFromFile(file, passphrase) {
+            const client = await ensureClient();
+            const text = await file.text();
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch (error) {
+                throw new Error(translate('protected.recovery_unreadable',
+                    'That file is not a recovery file this version understands'));
+            }
+            return client.restoreFromRecoveryFile(parsed, passphrase.trim());
         }
 
         /** Show the safety number for the open conversation. */
@@ -233,6 +363,7 @@
             let filled = 0;
             for (const message of messages) {
                 record.opened.set(message.messageId, {
+                    attachment: message.attachment || null,
                     text: message.readable ? message.text : null,
                     // MLS's answer about authorship, kept so the row can say so
                     // when it disagrees with what the server claimed.
@@ -254,6 +385,23 @@
                 body.dataset.protectedFilled = 'true';
                 if (opened.text === null) {
                     body.classList.add('message-unreadable');
+                }
+
+                // An attachment: the row has no text, so it gets a button that
+                // decrypts and downloads. Without this a protected attachment
+                // arrived and could not be opened at all.
+                if (opened.attachment && body.dataset.protectedAttachment !== 'true') {
+                    body.dataset.protectedAttachment = 'true';
+                    body.textContent = '';
+                    const button = doc.createElement('button');
+                    button.type = 'button';
+                    button.className = 'protected-attachment';
+                    button.textContent = opened.attachment.name ||
+                        translate('protected.attachment', 'Encrypted file');
+                    button.addEventListener('click', () => {
+                        openAttachment(opened.attachment).catch((error) => notify(error.message));
+                    });
+                    body.appendChild(button);
                 }
 
                 // A message whose signature does not belong to the account the
@@ -281,6 +429,11 @@
             adoptConversation,
             isProtected,
             send,
+            sendAttachment,
+            openAttachment,
+            admitNewDevices,
+            downloadRecoveryFile,
+            restoreFromFile,
             showSafetyNumber,
             decorateMessages,
             conversations,
@@ -397,6 +550,102 @@
                 }
                 input.value = '';
                 return ui.send(chatId, text)
+                    .then(() => { if (typeof window.loadMessages === 'function') window.loadMessages(chatId); })
+                    .catch((error) => {
+                        if (typeof window.showToast === 'function') window.showToast(error.message, 'error');
+                    });
+            };
+        }
+
+        // The recovery file needs somewhere to be asked for. Two globals, bound
+        // externally by csp-events.js because the policy denies inline handlers.
+        window.pmShowRecoveryDialog = function pmShowRecoveryDialog() {
+            const modal = document.getElementById('protectedRecoveryModal');
+            if (!modal || typeof window.bootstrap !== 'object' || !window.bootstrap.Modal) {
+                return;
+            }
+            // The passphrase from a previous visit must not still be on screen.
+            const holder = document.getElementById('protectedRecoveryResult');
+            const passphrase = document.getElementById('protectedRecoveryPassphrase');
+            if (holder && passphrase) {
+                passphrase.textContent = '';
+                holder.hidden = true;
+            }
+            window.bootstrap.Modal.getOrCreateInstance(modal).show();
+        };
+
+        window.pmDownloadRecoveryFile = function pmDownloadRecoveryFile() {
+            return ui.downloadRecoveryFile()
+                .then((recovery) => {
+                    const passphrase = document.getElementById('protectedRecoveryPassphrase');
+                    const holder = document.getElementById('protectedRecoveryResult');
+                    if (passphrase && holder) {
+                        // Shown once, never stored: the file is useless without it
+                        // and the server never sees either.
+                        passphrase.textContent = recovery.passphrase;
+                        holder.hidden = false;
+                    }
+                    return recovery;
+                })
+                .catch((error) => {
+                    if (typeof window.showToast === 'function') window.showToast(error.message, 'error');
+                });
+        };
+
+        window.pmRestoreFromRecoveryFile = function pmRestoreFromRecoveryFile() {
+            const input = document.getElementById('protectedRecoveryFile');
+            const passphrase = document.getElementById('protectedRestorePassphrase');
+            const file = input && input.files && input.files[0];
+            if (!file || !passphrase || !passphrase.value.trim()) {
+                if (typeof window.showToast === 'function') {
+                    window.showToast(
+                        (window.PmI18n && window.PmI18n.t
+                            ? window.PmI18n.t('protected.recovery_needs_both')
+                            : null) || 'Choose the recovery file and type its passphrase.',
+                        'error'
+                    );
+                }
+                return undefined;
+            }
+            return ui.restoreFromFile(file, passphrase.value)
+                .then(() => {
+                    passphrase.value = '';
+                    input.value = '';
+                    if (typeof window.showToast === 'function') {
+                        window.showToast(
+                            (window.PmI18n && window.PmI18n.t
+                                ? window.PmI18n.t('protected.recovery_restored')
+                                : null) || 'This device was restored from the recovery file.',
+                            'success'
+                        );
+                    }
+                })
+                .catch((error) => {
+                    if (typeof window.showToast === 'function') window.showToast(error.message, 'error');
+                });
+        };
+
+        // Attachments in a protected conversation go through the encrypting
+        // client. Until now `sendAttachment()` existed with nothing calling it,
+        // so picking a file in a protected chat took the legacy upload path —
+        // which the server now refuses outright, leaving the person with an
+        // error and no way to send a file at all.
+        const legacyFileSelect = window.handleFileSelect;
+        if (typeof legacyFileSelect === 'function') {
+            window.handleFileSelect = function protectedAwareFileSelect(event) {
+                const chatId = window.currentChatId;
+                if (!chatId || !ui.isProtected(chatId)) {
+                    return legacyFileSelect.apply(this, arguments);
+                }
+                const input = event && event.target;
+                const file = input && input.files && input.files[0];
+                if (!file) {
+                    return undefined;
+                }
+                if (input) {
+                    input.value = '';
+                }
+                return ui.sendAttachment(chatId, file)
                     .then(() => { if (typeof window.loadMessages === 'function') window.loadMessages(chatId); })
                     .catch((error) => {
                         if (typeof window.showToast === 'function') window.showToast(error.message, 'error');
