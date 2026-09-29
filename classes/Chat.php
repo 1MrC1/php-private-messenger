@@ -132,6 +132,55 @@ class Chat
         return $stmt->get_result()->num_rows === 1;
     }
 
+    /**
+     * Whether a conversation is protected, or null if that cannot be answered.
+     *
+     * WHY THIS IS HERE AND NOT ONLY IN THE API. An independent review found the
+     * hole this closes: `ProtectedChat` asserted the mode on its own paths, so
+     * the ordinary send, upload and edit paths wrote plaintext into a
+     * conversation the interface calls encrypted — total loss of the one
+     * property the feature exists to provide. A check at the API switch would
+     * have been the same mistake one layer up; the refusal belongs where the
+     * write happens.
+     *
+     * Three answers, deliberately distinct:
+     *   true  — protected, refuse the plaintext write
+     *   false — not protected, or protected conversations are not deployed at
+     *           all, in which case no chat can be protected
+     *   null  — the question could not be answered, so the caller must refuse
+     */
+    private function isProtectedChat($chatId)
+    {
+        if (!$this->isPositiveId($chatId)) {
+            return null;
+        }
+        $chatId = (int)$chatId;
+
+        try {
+            $stmt = $this->conn->prepare('SELECT 1 AS protected FROM chat_protection WHERE chat_id = ?');
+            if ($stmt === false) {
+                // 1146 is "table does not exist": protected conversations are
+                // not deployed here, so nothing can be protected.
+                return $this->conn->errno === 1146 ? false : null;
+            }
+            try {
+                $stmt->bind_param('i', $chatId);
+                if (!$stmt->execute()) {
+                    return null;
+                }
+                $result = $stmt->get_result();
+                if ($result === false) {
+                    return null;
+                }
+                return $result->num_rows > 0;
+            } finally {
+                $stmt->close();
+            }
+        } catch (mysqli_sql_exception $error) {
+            return $error->getCode() === 1146 ? false : null;
+        }
+    }
+
     private function removeStoredAttachment($relativePath)
     {
         if (!is_string($relativePath) ||
@@ -826,6 +875,26 @@ public function getNewMessages($chat_id, $user_id, $afterMessageId) {
 
             $chat_id = (int)$chat_id;
             $sender_id = (int)$sender_id;
+
+            // A protected conversation accepts sealed envelopes only. This is
+            // the plaintext path — for text and for attachments, which arrive
+            // here too — so it must refuse, and must refuse when it cannot tell.
+            $protected = $this->isProtectedChat($chat_id);
+            if ($protected === null) {
+                return $this->sendFailureResponse(
+                    'protection_state_unknown',
+                    503,
+                    'This conversation could not be checked for encryption; nothing was sent'
+                );
+            }
+            if ($protected === true) {
+                return $this->sendFailureResponse(
+                    'chat_is_protected',
+                    409,
+                    'This conversation is encrypted, so plaintext cannot be sent to it'
+                );
+            }
+
             if (!is_string($message_type) || !in_array($message_type, ['text', 'file'], true)) {
                 return $this->sendFailureResponse('invalid_message_type', 400, 'Invalid message type');
             }
@@ -1943,7 +2012,7 @@ private function createMessageStatus($message_id, $recipientIds) {
             $user_id = (int) $user_id;
             // Check if user owns the message
             $stmt = $this->conn->prepare("
-                SELECT created_at
+                SELECT created_at, chat_id
                 FROM messages
                 WHERE id = ? AND sender_id = ? AND is_deleted = FALSE AND message_type = 'text'
             ");
@@ -1956,6 +2025,26 @@ private function createMessageStatus($message_id, $recipientIds) {
             }
 
             $message = $result->fetch_assoc();
+
+            // Editing writes plaintext into `messages.content`, which in a
+            // protected conversation would sit in the clear beside the sealed
+            // envelope it was supposed to replace. There is no encrypted edit
+            // protocol here, so the answer is refusal rather than a best effort.
+            $protected = $this->isProtectedChat($message['chat_id'] ?? null);
+            if ($protected === null) {
+                return [
+                    'success' => false,
+                    'error_code' => 'protection_state_unknown',
+                    'message' => 'This conversation could not be checked for encryption; nothing was changed',
+                ];
+            }
+            if ($protected === true) {
+                return [
+                    'success' => false,
+                    'error_code' => 'chat_is_protected',
+                    'message' => 'Messages in an encrypted conversation cannot be edited',
+                ];
+            }
 
             // Check if message is not too old (48 hours limit)
             $messageTime = strtotime($message['created_at']);

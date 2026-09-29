@@ -872,6 +872,10 @@
     "protected.enroll_submit": "设置设备",
     "protected.no_scanning": "受保护对话中的文件不会进行病毒扫描。请只打开你信任的人发来的、且在你预期之中的文件。",
     "protected.safety_label": "安全码",
-    "protected.revocation_check_failed": "无法确认已吊销的设备是否仍在这个会话中。"
+    "protected.revocation_check_failed": "无法确认已吊销的设备是否仍在这个会话中。",
+    "api.chat_is_protected": "这个会话已加密，因此无法向它发送未加密的内容。",
+    "api.protection_state_unknown_send": "无法确认这个会话是否已加密；没有发送任何内容。",
+    "api.protected_edit_refused": "加密会话中的消息无法编辑。",
+    "api.protection_state_unknown_edit": "无法确认这个会话是否已加密；没有更改任何内容。"
   }
 }

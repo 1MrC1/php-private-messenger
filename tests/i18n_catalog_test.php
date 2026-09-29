@@ -588,12 +588,16 @@ Verification is temporarily unavailable. Please try again.
 You no longer have access to this chat
 Your attachment storage quota has been reached
 Your hourly attachment limit has been reached
+Messages in an encrypted conversation cannot be edited
+This conversation could not be checked for encryption; nothing was changed
+This conversation could not be checked for encryption; nothing was sent
+This conversation is encrypted, so plaintext cannot be sent to it
 PM_API_ENVELOPE_SOURCES
 ));
 i18nCatalogAssert(
     is_array($requiredApiEnvelopeSources) &&
-        count($requiredApiEnvelopeSources) === 196 &&
-        count(array_unique($requiredApiEnvelopeSources)) === 196,
+        count($requiredApiEnvelopeSources) === 200 &&
+        count(array_unique($requiredApiEnvelopeSources)) === 200,
     'the audited public API envelope source fixture is complete and duplicate-free'
 );
 $missingApiEnvelopeSources = [];

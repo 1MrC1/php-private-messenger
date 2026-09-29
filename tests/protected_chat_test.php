@@ -34,6 +34,59 @@ protectedAssert(
     'the plaintext fingerprint still distinguishes content'
 );
 
+// ---- the plaintext paths must refuse a protected conversation --------------
+// An independent review (2026-09-29) found that `assertProtectionMatches()` was
+// only ever called on the protected path, so the ordinary send, upload and edit
+// paths wrote plaintext into conversations the interface calls encrypted. These
+// assertions are source-level because the suite has no database; the fix was
+// also verified against a real MySQL instance with the reviewer's own
+// reproduction, which now aborts at the first step.
+
+$chatSource = (string)file_get_contents($root . '/classes/Chat.php');
+
+protectedAssert(
+    str_contains($chatSource, 'private function isProtectedChat('),
+    'Chat has its own protection check, at the layer where writes happen'
+);
+
+// Three distinct answers, and "unknown" must not mean "allowed".
+protectedAssert(
+    str_contains($chatSource, "return \$this->conn->errno === 1146 ? false : null;") &&
+        str_contains($chatSource, "return \$error->getCode() === 1146 ? false : null;"),
+    'a missing table means no chat is protected; any other failure means unknown'
+);
+protectedAssert(
+    substr_count($chatSource, "'protection_state_unknown'") === 2,
+    'both plaintext paths refuse when the protection state cannot be determined'
+);
+protectedAssert(
+    substr_count($chatSource, "'chat_is_protected'") === 2,
+    'both plaintext paths refuse a protected conversation'
+);
+
+// The refusal has to precede the write. Compare positions inside each method.
+$sendStart = (int)strpos($chatSource, 'public function sendMessage(');
+$sendBody = substr($chatSource, $sendStart, 6000);
+$sendGuard = strpos($sendBody, '$this->isProtectedChat(');
+$sendInsert = strpos($sendBody, 'INSERT INTO messages');
+protectedAssert(
+    $sendGuard !== false && ($sendInsert === false || $sendGuard < $sendInsert),
+    'sendMessage checks protection before it inserts anything'
+);
+
+$editStart = (int)strpos($chatSource, 'public function editMessage(');
+$editBody = substr($chatSource, $editStart, 6000);
+$editGuard = strpos($editBody, '$this->isProtectedChat(');
+$editUpdate = strpos($editBody, 'UPDATE messages');
+protectedAssert(
+    $editGuard !== false && ($editUpdate === false || $editGuard < $editUpdate),
+    'editMessage checks protection before it updates anything'
+);
+protectedAssert(
+    str_contains($editBody, 'SELECT created_at, chat_id'),
+    'editMessage reads the chat the message belongs to, rather than trusting the caller'
+);
+
 // ---- envelope shape: every rejection has a name ---------------------------
 // These run without a database on purpose: the checks are decidable from the
 // envelope alone, and the checklist in issue #7 asks for each refusal to be a

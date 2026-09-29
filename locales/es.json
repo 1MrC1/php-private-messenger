@@ -872,6 +872,10 @@
     "protected.enroll_submit": "Configurar dispositivo",
     "protected.no_scanning": "Los archivos en conversaciones protegidas no se analizan en busca de malware. Abre solo lo que esperas de alguien en quien confías.",
     "protected.safety_label": "Número de seguridad",
-    "protected.revocation_check_failed": "No se pudo comprobar si un dispositivo revocado sigue en esta conversación."
+    "protected.revocation_check_failed": "No se pudo comprobar si un dispositivo revocado sigue en esta conversación.",
+    "api.chat_is_protected": "Esta conversación está cifrada, así que no se puede enviar texto sin cifrar.",
+    "api.protection_state_unknown_send": "No se pudo comprobar si esta conversación está cifrada; no se envió nada.",
+    "api.protected_edit_refused": "Los mensajes de una conversación cifrada no se pueden editar.",
+    "api.protection_state_unknown_edit": "No se pudo comprobar si esta conversación está cifrada; no se cambió nada."
   }
 }
