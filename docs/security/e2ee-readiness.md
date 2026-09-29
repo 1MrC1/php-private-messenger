@@ -313,18 +313,45 @@ finding was reproduced before it was acted on.
   checked four of eight tables; the blob cap advertised 8 MiB while the
   transport allowed about 49 KiB.
 
-**Open, and honestly open.**
+**Also fixed, in the days after.**
 
-- The safety number does not bind the conversation, so two groups with the same
-  members and different keys look identical.
-- No client verifies the directory hash chain.
-- A reload loses the chat-to-group mapping and previously opened history.
-- Device state is keyed per origin, not per account, so an account switch in one
-  browser reuses the first account's signer.
-- Any authenticated account can exhaust another account's key packages.
-- The encrypted-blob quota is racy, and abandoned blobs are not cleaned up.
-- The attachment, recovery and later-device-admission helpers exist in the
-  client with no production interface calling them, which earlier text here
-  described as shipped. They are not.
-- `MessageIdempotency::envelopeFingerprint()` has no production caller, so the
-  protected retry path it was written for is not integrated.
+- *The safety number bound nothing but membership*, so two separately keyed
+  groups with the same people showed the same number. It now includes the group
+  id and a secret exported from the group at its current epoch.
+- *Device state was shared across accounts on one origin.* Storage identifiers
+  are scoped to the account and the account is sealed inside the record.
+- *Any account could exhaust another's key packages.* A claim must name a
+  conversation both are in.
+- *A reload emptied a protected conversation.* The chat-to-group mapping and the
+  text of messages this device has already opened are kept in a store sealed with
+  the same non-extractable key, bounded to the most recent five hundred per
+  conversation. **Plaintext at rest is a real cost**, named here rather than
+  buried: it is sealed, it never leaves the device, and the alternative was a
+  messenger that forgot every conversation when the tab closed, which would have
+  pushed people back to the plaintext path.
+- *No client verified the directory hash chain.* `verifyDirectory()` walks it
+  against the head this device last saw, refuses a gap or an entry that does not
+  continue that history, and the interface refuses to send while it disagrees.
+  The boundary is unchanged and worth repeating: this catches a server that
+  rewrites what it has already shown, not one that has lied from the start.
+- *The ciphertext retry fingerprint had no caller*, so protected sends had no
+  retry protection. They carry a retry identifier now; a replay returns the
+  original message and a conflicting one is refused.
+- *Encrypted attachments were never linked to their message*, so an in-use blob
+  looked identical to an abandoned upload. They are linked, and `pruneOrphans()`
+  removes unreferenced ciphertext.
+- *The attachment, recovery and admission helpers had no interface calling them*
+  — the most embarrassing kind of finding, because this document called them
+  shipped. Choosing a file in a protected conversation now encrypts it, a
+  decrypted attachment renders as something openable, opening a conversation
+  admits devices the other account enrolled since, and a settings entry
+  downloads or restores a recovery file.
+
+**Still open.**
+
+- The independent cryptographic review (#7), which is external by definition.
+- Metadata is visible to the server by construction, and always was. Not a
+  finding; a documented position.
+- Forward secrecy and post-compromise security are whatever MLS gives for the
+  epochs a device holds: nothing here forces a periodic key update.
+- The directory chain is not key transparency, and cannot become it here.

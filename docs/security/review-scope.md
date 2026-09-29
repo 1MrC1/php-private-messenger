@@ -55,6 +55,15 @@ re-deriving it, and which claims are worth attacking.
 - **Reproducibility**: rebuilding the WebAssembly reproduced the committed
   artifact byte for byte, and `test-utils` is confined to `[dev-dependencies]` —
   `crypto/BUILDING.md`.
+- **A previous adversarial review** (2026-09-29) and its sixteen findings, all
+  fixed: the mode boundary at every write, fork detection by exact commit
+  reference, authenticated authorship, directory-to-key-package binding,
+  publication before success, revocation re-checked per open, the safety number
+  bound to the group, per-account device state, key-package exhaustion, the state
+  parser, the recovery file's authenticated header, reload persistence, chain
+  verification, ciphertext retry protection, blob linking and the unreachable
+  helpers. `e2ee-readiness.md` lists them; re-deriving them is not the best use
+  of a second reviewer.
 
 ## Claims we would most like attacked
 

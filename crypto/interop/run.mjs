@@ -103,6 +103,7 @@ function device(page, key) {
         joinGroup: (welcome, tree) => call('joinGroup', welcome, tree),
         seal: (groupId, text) => call('seal', groupId, text),
         open: (groupId, sealed) => call('open', groupId, sealed),
+        openAuthenticated: (groupId, sealed) => call('openAuthenticated', groupId, sealed),
         applyHandshake: (handshake) => call('applyHandshake', handshake),
         removeMember: (groupId, signatureKey) => call('removeMember', groupId, signatureKey),
         identityKey: () => call('identityKey'),
@@ -147,6 +148,17 @@ async function conversation(alicePage, bobPage, label) {
     const reply = await bob.seal(joined, back);
     if (await alice.open(groupId, reply) !== back) {
         throw new Error(label + ': the reply did not survive the crossing');
+    }
+
+    // Authorship has to cross engines too: the sender key one engine reports must
+    // be the identity key the other engine holds.
+    const authored = await bob.seal(joined, 'signed in one engine');
+    const authenticated = await alice.openAuthenticated(groupId, authored);
+    if (authenticated.text !== 'signed in one engine') {
+        throw new Error(label + ': an authored message did not survive the crossing');
+    }
+    if (authenticated.senderKey !== bobKey) {
+        throw new Error(label + ': the authenticated sender key does not match across engines');
     }
 
     // The safety number is what people compare out of band; it must not depend

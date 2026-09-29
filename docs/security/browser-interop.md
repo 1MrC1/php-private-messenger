@@ -37,6 +37,9 @@ hold a real conversation through the committed WebAssembly artifact:
   same group id
 - a sealed message opened in the other engine, and a reply opened back — a
   one-way check would miss an engine that can read but not write
+- the MLS-authenticated sender key reported by one engine matching the identity
+  key held by the other, so authorship survives the crossing and not just the
+  bytes
 - the safety number computed on both sides, which must not depend on the engine
 - a third device admitted, with the existing member applying the commit, and all
   three reading the next message at the same epoch
@@ -48,6 +51,10 @@ non-extractable AES-GCM key, that key surviving a round trip through IndexedDB,
 and PBKDF2-SHA512 at 600 000 iterations for recovery files.
 
 ## Results
+
+**Re-run 2026-09-29** after the review fixes changed the engine (fork detection,
+authenticated senders, the bound safety number, the new state format): all nine
+pairs still interoperate, with the same versions and timings within noise.
 
 **2026-09-28**, `pm_mls.js` / `pm_mls_bg.wasm` as committed (digests in
 `assets/vendor/mls/ARTIFACTS.sha256`), OpenMLS 0.9.0, cipher suite 1

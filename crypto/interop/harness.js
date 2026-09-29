@@ -64,7 +64,20 @@ window.pm = {
         return toBase64(sessions.get(key).seal(fromBase64(groupId), encoder.encode(text)));
     },
     open(key, groupId, sealed) {
-        return decoder.decode(sessions.get(key).open(fromBase64(groupId), fromBase64(sealed)));
+        const opened = sessions.get(key).open(fromBase64(groupId), fromBase64(sealed));
+        return decoder.decode(opened.plaintext);
+    },
+    /** The sender MLS authenticated, so the runner can check it crosses engines. */
+    openAuthenticated(key, groupId, sealed) {
+        const opened = sessions.get(key).open(fromBase64(groupId), fromBase64(sealed));
+        return {
+            text: decoder.decode(opened.plaintext),
+            senderKey: opened.sender_key ? toBase64(opened.sender_key) : null,
+            senderLeaf: opened.sender_leaf,
+        };
+    },
+    hasDiverged(key, groupId) {
+        return sessions.get(key).has_diverged(fromBase64(groupId));
     },
     applyHandshake(key, handshake) {
         return sessions.get(key).apply_handshake(fromBase64(handshake));
