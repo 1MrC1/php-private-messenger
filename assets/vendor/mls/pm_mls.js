@@ -140,6 +140,9 @@ export class MlsSession {
     }
     /**
      * The whole session as bytes. Contains private keys: wrap before storing.
+     *
+     * The commit digests and any divergence travel with it: a reload that
+     * forgot them would start calling forks retries again.
      * @returns {Uint8Array}
      */
     export_state() {
@@ -150,6 +153,17 @@ export class MlsSession {
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
+    }
+    /**
+     * Whether this session has seen a fork in a group, and so must not send.
+     * @param {Uint8Array} group_id
+     * @returns {boolean}
+     */
+    has_diverged(group_id) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_has_diverged(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
     }
     /**
      * Whether a device is already a member of a group.
@@ -229,11 +243,20 @@ export class MlsSession {
         return this;
     }
     /**
-     * Open a message, or apply a commit. Returns the plaintext for an
-     * application message and an empty vector for group state changes.
+     * Open an application message and report who MLS says sent it.
+     *
+     * Returns `{ plaintext, sender_key, sender_leaf }`. The sender is the
+     * protocol's answer, not the server's: a review showed that returning only
+     * the bytes threw away MLS's authorship guarantee, so changing one
+     * server-controlled field re-attributed authenticated content to another
+     * account. The caller must compare `sender_key` against the device
+     * directory and refuse a mismatch.
+     *
+     * A handshake that arrives here is applied as before, and reports itself
+     * with an empty plaintext and no sender.
      * @param {Uint8Array} group_id
      * @param {Uint8Array} sealed
-     * @returns {Uint8Array}
+     * @returns {any}
      */
     open(group_id, sealed) {
         const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
@@ -241,12 +264,10 @@ export class MlsSession {
         const ptr1 = passArray8ToWasm0(sealed, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
         const ret = wasm.mlssession_open(this.__wbg_ptr, ptr0, len0, ptr1, len1);
-        if (ret[3]) {
-            throw takeFromExternrefTable0(ret[2]);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
-        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v3;
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * This device's own leaf index in the group.
@@ -540,12 +561,17 @@ function __wbg_get_imports() {
             const ret = arg0.versions;
             return ret;
         },
-        __wbindgen_generic_0000000000000001: function(arg0, arg1) {
+        __wbindgen_generic_0000000000000001: function(arg0) {
+            // Cast intrinsic for `F64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
+        __wbindgen_generic_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
             const ret = getArrayU8FromWasm0(arg0, arg1);
             return ret;
         },
-        __wbindgen_generic_0000000000000002: function(arg0, arg1) {
+        __wbindgen_generic_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return ret;

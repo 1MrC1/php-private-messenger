@@ -876,6 +876,9 @@
     "api.chat_is_protected": "这个会话已加密，因此无法向它发送未加密的内容。",
     "api.protection_state_unknown_send": "无法确认这个会话是否已加密；没有发送任何内容。",
     "api.protected_edit_refused": "加密会话中的消息无法编辑。",
-    "api.protection_state_unknown_edit": "无法确认这个会话是否已加密；没有更改任何内容。"
+    "api.protection_state_unknown_edit": "无法确认这个会话是否已加密；没有更改任何内容。",
+    "protected.rejoin_required": "需要重新加入这个会话，才能继续发送内容。",
+    "protected.author_mismatch": "这条消息的签名账户与显示的账户不一致。",
+    "protected.author_unverified": "无法验证这条消息的发送者。"
   }
 }

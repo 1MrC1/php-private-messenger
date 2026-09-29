@@ -65,7 +65,14 @@ function fakeServer() {
                     key_packages: list.map((device) => {
                         const next = device.keyPackages.shift();
                         return next
-                            ? { device_id: device.deviceId, key_package: next, exhausted: false }
+                            ? {
+                                device_id: device.deviceId,
+                                // The enrolled key, which the admitting client
+                                // compares against the key inside the package.
+                                signature_public_key: device.claimedKey || device.signatureKey,
+                                key_package: next,
+                                exhausted: false,
+                            }
                             : { device_id: device.deviceId, key_package: null, exhausted: true };
                     }),
                 };
@@ -290,6 +297,69 @@ function fakeServer() {
     assert.equal(numberAfter, await tablet.safetyNumber(tabletJoin.groupId),
         'every device computes the same safety number');
     console.log('PASS: the safety number agrees across all three devices');
+
+    // ---- authorship comes from MLS, not from the row -----------------------
+    // The reviewer changed one server-controlled field and watched authenticated
+    // content be re-attributed to another account. Attribution now comes from
+    // the signature MLS verified, and a disagreement is visible.
+
+    // A fresh message each time: MLS will not open the same one twice, so the
+    // honest and tampered cases each need their own.
+    const honestText = 'who wrote this matters';
+    const honestSend = await ada.send(42, started.groupId, honestText);
+    const honestRead = await miraAgain.receive(42, sync.groupId, honestSend.messageId - 1);
+    const genuine = honestRead.find((message) => message.text === honestText);
+    assert.ok(genuine, 'the message is there');
+    assert.equal(genuine.authorship, 'verified', 'an untouched message is attributed to its signer');
+    assert.equal(genuine.senderId, 1, 'and the signer is the account that sent it');
+
+    // Now the server lies about who wrote the next one, before anyone reads it.
+    const forgedText = 'and so does who did not';
+    const forgedSend = await ada.send(42, started.groupId, forgedText);
+    const row = server.envelopes.get(42).find((entry) => entry.message_id === forgedSend.messageId);
+    const realSenderId = row.sender_id;
+    row.sender_id = 999999;
+
+    const tamperedRead = await miraAgain.receive(42, sync.groupId, forgedSend.messageId - 1);
+    const forged = tamperedRead.find((message) => message.messageId === forgedSend.messageId);
+    assert.equal(forged.text, forgedText, 'the message still decrypts: MLS protected the bytes');
+    assert.equal(forged.authorship, 'mismatched',
+        'a row that disagrees with the signature is reported as mismatched');
+    assert.equal(forged.senderId, realSenderId,
+        'attribution stays with the account MLS authenticated');
+    assert.equal(forged.claimedSenderId, 999999,
+        'and what the server claimed is kept separately rather than silently used');
+    row.sender_id = realSenderId;
+    console.log('PASS: changing the server-side sender does not change who a message is attributed to');
+
+    // ---- a key package that does not match the enrolled key ----------------
+    // The reviewer's scenario: a device advertises signature key X in the
+    // directory while publishing key packages signed by Y. Admission would add
+    // Y, revocation would look for X, and the device could never be removed.
+
+    const impostorStorage = memoryStorage();
+    const impostor = build(4, impostorStorage);
+    await impostor.enroll({
+        identity: 'impostor@example', label: 'Laptop',
+        currentPassword: 'secret', secondFactorCode: '444444', keyPackageCount: 2,
+    });
+    const impostorDevice = server.devices.get(4)[0];
+    // Same device, different advertised key: only the directory column changes.
+    impostorDevice.claimedKey = Buffer.from('a key this device does not sign with').toString('base64');
+
+    await assert.rejects(
+        () => ada.startConversation(77, 4),
+        /does not match its enrolled key/,
+        'a key package that does not match the enrolled key is refused rather than admitted'
+    );
+    console.log('PASS: a device whose key package disagrees with its directory key is not admitted');
+
+    // And the honest case still works, so the check is not simply refusing
+    // everything.
+    impostorDevice.claimedKey = undefined;
+    const honest = await ada.startConversation(78, 4);
+    assert.ok(honest.groupId, 'a device whose keys agree is admitted normally');
+    console.log('PASS: the binding check still admits an honest device');
 
     // ---- revocation actually stops a device reading ------------------------
     // Revoking a device stops it being offered new key packages. That alone does

@@ -248,7 +248,8 @@ final class DeviceDirectory
     public function claimKeyPackages(int $claimingUserId, int $targetUserId): array
     {
         $devices = $this->select(
-            'SELECT id, public_id FROM e2ee_devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY id',
+            'SELECT id, public_id, signature_public_key
+               FROM e2ee_devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY id',
             'i',
             [$targetUserId]
         );
@@ -295,6 +296,13 @@ final class DeviceDirectory
                 $claimed[] = [
                     'device_id' => $deviceId,
                     'public_id' => base64_encode((string)$device['public_id']),
+                    // The key this device claims to sign with. The admitting
+                    // client compares it against the key inside the key package
+                    // and refuses a mismatch: a review showed the two were only
+                    // ever checked independently, which produced devices that
+                    // joined under one key and could not be revoked by the
+                    // other.
+                    'signature_public_key' => base64_encode((string)$device['signature_public_key']),
                     'key_package' => base64_encode((string)$candidate[0]['key_package']),
                     'exhausted' => false,
                 ];

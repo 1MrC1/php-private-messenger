@@ -36,8 +36,25 @@ function fakeDocument(rows) {
     };
 }
 
+/** The interface under test, wired to a fake document and client. */
+function makeUi(doc, client, notify) {
+    return createProtectedUi({
+        document: doc,
+        post: async () => ({ success: true }),
+        clientFactory: async () => client,
+        prompt: async () => null,
+        notify: notify || (() => {}),
+    });
+}
+
 function fakeClient(options) {
-    const state = { enrolled: options.enrolled === true, sent: [], joined: options.joined !== false };
+    const state = {
+        enrolled: options.enrolled === true,
+        sent: [],
+        joined: options.joined !== false,
+        // How many times the interface asked for revoked devices to be removed.
+        revocationChecks: 0,
+    };
     return {
         state,
         resume: async () => state.enrolled,
@@ -46,6 +63,14 @@ function fakeClient(options) {
         syncGroup: async () => (state.joined ? { groupId: 'group-for-42', lastSequence: 1 } : { groupId: null, lastSequence: 0 }),
         send: async (chatId, groupId, text) => { state.sent.push({ chatId, groupId, text }); return { messageId: 7 }; },
         receive: async () => options.messages || [],
+        enforceRevocations: async () => {
+            state.revocationChecks++;
+            if (options.revocationFails === true) {
+                throw new Error('the directory could not be read');
+            }
+            return { removed: [] };
+        },
+        sendingBlocked: () => options.sendingBlocked || null,
     };
 }
 
@@ -174,6 +199,58 @@ function fakeClient(options) {
         await ui.decorateMessages(42);
         assert.equal(readable.textContent, 'left alone', 'an already-filled row is not rewritten');
         console.log('PASS: re-rendering does not rewrite filled rows');
+    }
+
+    // ---- revocation is re-checked, and sending fails closed ----------------
+    // A review found the boolean that used to guard this: a device revoked after
+    // the first open stayed a member for the life of the page.
+
+    {
+        const doc = fakeDocument([]);
+        doc.markChatProtected(42, true);
+        const client = fakeClient({ enrolled: true });
+        const ui = makeUi(doc, client);
+
+        await ui.adoptConversation(42);
+        await ui.adoptConversation(42);
+        await ui.adoptConversation(42);
+        assert.equal(client.state.revocationChecks, 3,
+            'every open re-checks for revoked devices, rather than once per page');
+        console.log('PASS: revoked devices are looked for on every open, not once');
+    }
+
+    {
+        const notices = [];
+        const doc = fakeDocument([]);
+        doc.markChatProtected(42, true);
+        const client = fakeClient({ enrolled: true, revocationFails: true });
+        const ui = makeUi(doc, client, (message) => notices.push(message));
+
+        await ui.adoptConversation(42);
+        await assert.rejects(() => ui.send(42, 'while a removal may be pending'),
+            /revoked device/,
+            'sending is refused while the revocation check is failing');
+        assert.equal(client.state.sent.length, 0, 'nothing was sent');
+        assert.ok(notices.some((line) => /revoked device/.test(line)),
+            'and the person is told why');
+        console.log('PASS: a failed revocation check blocks sending instead of being swallowed');
+    }
+
+    {
+        const notices = [];
+        const doc = fakeDocument([]);
+        doc.markChatProtected(42, true);
+        const client = fakeClient({
+            enrolled: true,
+            sendingBlocked: 'this conversation has diverged from the rest of the group',
+        });
+        const ui = makeUi(doc, client, (message) => notices.push(message));
+
+        await ui.adoptConversation(42);
+        await assert.rejects(() => ui.send(42, 'on a branch nobody else took'), /diverged/,
+            'sending is refused after a fork');
+        assert.equal(client.state.sent.length, 0, 'nothing was sent');
+        console.log('PASS: a forked conversation refuses to send');
     }
 
     console.log('Protected interface runtime tests passed.');

@@ -876,6 +876,9 @@
     "api.chat_is_protected": "這個對話已加密，因此無法向它傳送未加密的內容。",
     "api.protection_state_unknown_send": "無法確認這個對話是否已加密；沒有傳送任何內容。",
     "api.protected_edit_refused": "加密對話中的訊息無法編輯。",
-    "api.protection_state_unknown_edit": "無法確認這個對話是否已加密；沒有變更任何內容。"
+    "api.protection_state_unknown_edit": "無法確認這個對話是否已加密；沒有變更任何內容。",
+    "protected.rejoin_required": "需要重新加入這個對話，才能繼續傳送內容。",
+    "protected.author_mismatch": "這則訊息的簽章帳戶與顯示的帳戶不一致。",
+    "protected.author_unverified": "無法驗證這則訊息的傳送者。"
   }
 }

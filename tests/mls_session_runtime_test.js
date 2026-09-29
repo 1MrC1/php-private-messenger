@@ -63,7 +63,7 @@ const decoder = new TextDecoder();
         'the plaintext is absent from the sealed bytes at the byte level');
     console.log('PASS: the sealed message does not contain the plaintext');
 
-    assert.equal(decoder.decode(bob.open(joinedId, sealed)), secret,
+    assert.equal(decoder.decode(bob.open(joinedId, sealed).plaintext), secret,
         'the recipient recovers the message');
     console.log('PASS: the recipient opens it');
 
@@ -73,7 +73,7 @@ const decoder = new TextDecoder();
 
     const restored = module.MlsSession.restore(state, bobPublicKey, encoder.encode('bob@example'));
     const second = alice.seal(groupId, encoder.encode('and bring the cello'));
-    assert.equal(decoder.decode(restored.open(joinedId, second)), 'and bring the cello',
+    assert.equal(decoder.decode(restored.open(joinedId, second).plaintext), 'and bring the cello',
         'a restored session keeps decrypting');
     console.log('PASS: exported state restores and keeps working across sessions');
 
@@ -128,9 +128,9 @@ const decoder = new TextDecoder();
         'each device knows its own distinct leaf');
 
     const toThree = alice.seal(groupId, encoder.encode('three in the room'));
-    assert.equal(decoder.decode(bob.open(joinedId, toThree)), 'three in the room',
+    assert.equal(decoder.decode(bob.open(joinedId, toThree).plaintext), 'three in the room',
         'the member who applied the commit keeps reading');
-    assert.equal(decoder.decode(carol.open(carolGroupId, toThree)), 'three in the room',
+    assert.equal(decoder.decode(carol.open(carolGroupId, toThree).plaintext), 'three in the room',
         'so does the one who just joined');
     console.log('PASS: a membership change keeps every member in step');
 
@@ -167,11 +167,11 @@ const decoder = new TextDecoder();
     const ordered1 = alice.seal(groupId, encoder.encode('first'));
     const ordered2 = alice.seal(groupId, encoder.encode('second'));
     const ordered3 = alice.seal(groupId, encoder.encode('third'));
-    assert.equal(decoder.decode(bob.open(joinedId, ordered3)), 'third',
+    assert.equal(decoder.decode(bob.open(joinedId, ordered3).plaintext), 'third',
         'a later message opens before an earlier one');
-    assert.equal(decoder.decode(bob.open(joinedId, ordered1)), 'first',
+    assert.equal(decoder.decode(bob.open(joinedId, ordered1).plaintext), 'first',
         'the earlier one still opens afterwards');
-    assert.equal(decoder.decode(bob.open(joinedId, ordered2)), 'second',
+    assert.equal(decoder.decode(bob.open(joinedId, ordered2).plaintext), 'second',
         'and so does the one between them');
     assert.throws(() => bob.open(joinedId, ordered2), /processing failed/,
         'the same message a second time is refused');
@@ -182,7 +182,7 @@ const decoder = new TextDecoder();
     // must not be able to read what is sent next, while everyone else must.
 
     const before = alice.seal(groupId, encoder.encode('before the removal'));
-    assert.equal(decoder.decode(bob.open(joinedId, before)), 'before the removal',
+    assert.equal(decoder.decode(bob.open(joinedId, before).plaintext), 'before the removal',
         'the member reads normally before being removed');
 
     const removal = alice.remove_member(groupId, bob.identity_key());
@@ -191,12 +191,12 @@ const decoder = new TextDecoder();
         'the remaining member applies the removal');
 
     const afterRemoval = alice.seal(groupId, encoder.encode('after the removal'));
-    assert.equal(decoder.decode(carol.open(carolGroupId, afterRemoval)), 'after the removal',
+    assert.equal(decoder.decode(carol.open(carolGroupId, afterRemoval).plaintext), 'after the removal',
         'the remaining member keeps reading across the removal');
 
     let removedCouldRead = false;
     try {
-        removedCouldRead = decoder.decode(bob.open(joinedId, afterRemoval)) === 'after the removal';
+        removedCouldRead = decoder.decode(bob.open(joinedId, afterRemoval).plaintext) === 'after the removal';
     } catch (error) {
         removedCouldRead = false;
     }

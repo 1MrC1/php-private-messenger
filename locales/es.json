@@ -876,6 +876,9 @@
     "api.chat_is_protected": "Esta conversación está cifrada, así que no se puede enviar texto sin cifrar.",
     "api.protection_state_unknown_send": "No se pudo comprobar si esta conversación está cifrada; no se envió nada.",
     "api.protected_edit_refused": "Los mensajes de una conversación cifrada no se pueden editar.",
-    "api.protection_state_unknown_edit": "No se pudo comprobar si esta conversación está cifrada; no se cambió nada."
+    "api.protection_state_unknown_edit": "No se pudo comprobar si esta conversación está cifrada; no se cambió nada.",
+    "protected.rejoin_required": "Hay que volver a unirse a esta conversación antes de enviar algo más.",
+    "protected.author_mismatch": "Este mensaje fue firmado por una cuenta distinta de la que se muestra.",
+    "protected.author_unverified": "No se pudo verificar quién envió este mensaje."
   }
 }

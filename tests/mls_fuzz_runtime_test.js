@@ -43,7 +43,7 @@ function seededRandom(seed) {
     const sealed = alice.seal(groupId, encoder.encode(secret));
 
     // Sanity: the honest path works before we start breaking things.
-    assert.equal(decoder.decode(bob.open(bobGroupId, sealed)), secret,
+    assert.equal(decoder.decode(bob.open(bobGroupId, sealed).plaintext), secret,
         'the untouched message opens');
     console.log('PASS: the untouched message opens');
 
@@ -93,7 +93,7 @@ function seededRandom(seed) {
 
         let result = null;
         try {
-            result = bob.open(bobGroupId, input);
+            result = bob.open(bobGroupId, input).plaintext;
         } catch (error) {
             refused++;
             continue;
@@ -112,7 +112,7 @@ function seededRandom(seed) {
 
     // The session must still work after all that.
     const after = alice.seal(groupId, encoder.encode('and bring the cello'));
-    assert.equal(decoder.decode(bob.open(bobGroupId, after)), 'and bring the cello',
+    assert.equal(decoder.decode(bob.open(bobGroupId, after).plaintext), 'and bring the cello',
         'the session still works after being fed hundreds of malformed messages');
     console.log('PASS: the session survives the fuzzing and keeps working');
 

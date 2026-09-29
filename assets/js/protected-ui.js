@@ -110,16 +110,19 @@
             conversations.set(chatId, record);
 
             // A device revoked in settings keeps the keys it already holds, so
-            // somebody still in the conversation has to publish a removal. Done
-            // here rather than silently skipped, and reported if it fails: a
-            // security control that fails quietly is worse than one that is
-            // absent, because nobody looks for it.
-            if (record.groupId && !record.revocationsChecked) {
-                record.revocationsChecked = true;
+            // somebody still in the conversation has to publish a removal.
+            //
+            // This runs on every open, not once per record: a review found the
+            // boolean that used to guard it, which meant a device revoked after
+            // the first open stayed a member for the life of the page. A failed
+            // check also blocks sending, because a pending removal is exactly
+            // when one should not keep talking.
+            if (record.groupId) {
                 try {
                     await active.enforceRevocations(chatId, record.groupId);
+                    record.revocationCheckFailed = false;
                 } catch (error) {
-                    record.revocationsChecked = false;
+                    record.revocationCheckFailed = true;
                     notify(translate('protected.revocation_check_failed',
                         'Could not check whether a revoked device is still in this conversation.'));
                 }
@@ -139,7 +142,23 @@
                 throw new Error(translate('protected.not_joined',
                     'This device has not joined that protected conversation yet'));
             }
-            return (await ensureClient()).send(chatId, groupId, text);
+            const client = await ensureClient();
+
+            // Fail closed rather than send into a membership we are unsure of:
+            // a revocation we could not check, a change we could not publish, or
+            // a fork the engine reported.
+            const record = conversations.get(chatId);
+            if (record && record.revocationCheckFailed === true) {
+                throw new Error(translate('protected.revocation_check_failed',
+                    'Could not check whether a revoked device is still in this conversation.'));
+            }
+            const blocked = client.sendingBlocked(chatId, groupId);
+            if (blocked) {
+                notify(translate('protected.rejoin_required',
+                    'This conversation has to be rejoined before anything else is sent.'));
+                throw new Error(blocked);
+            }
+            return client.send(chatId, groupId, text);
         }
 
         /** Show the safety number for the open conversation. */
@@ -178,9 +197,14 @@
 
             let filled = 0;
             for (const message of messages) {
-                record.opened.set(message.messageId, message.readable ? message.text : null);
+                record.opened.set(message.messageId, {
+                    text: message.readable ? message.text : null,
+                    // MLS's answer about authorship, kept so the row can say so
+                    // when it disagrees with what the server claimed.
+                    authorship: message.authorship,
+                });
             }
-            for (const [messageId, text] of record.opened) {
+            for (const [messageId, opened] of record.opened) {
                 const row = doc.querySelector('.message-row[data-message-id="' + messageId + '"]');
                 if (!row) {
                     continue;
@@ -189,12 +213,27 @@
                 if (!body || body.dataset.protectedFilled === 'true') {
                     continue;
                 }
-                body.textContent = text === null
+                body.textContent = opened.text === null
                     ? translate('protected.unreadable', 'This message cannot be read on this device')
-                    : text;
+                    : opened.text;
                 body.dataset.protectedFilled = 'true';
-                if (text === null) {
+                if (opened.text === null) {
                     body.classList.add('message-unreadable');
+                }
+
+                // A message whose signature does not belong to the account the
+                // server named is displayed with that said plainly. Hiding the
+                // text would lose information; presenting it as authentic would
+                // be a lie.
+                if (opened.authorship === 'mismatched' || opened.authorship === 'unverified') {
+                    const warning = doc.createElement('span');
+                    warning.className = 'message-authorship-warning';
+                    warning.textContent = opened.authorship === 'mismatched'
+                        ? translate('protected.author_mismatch',
+                            'This message was signed by a different account than the one shown.')
+                        : translate('protected.author_unverified',
+                            'The sender of this message could not be verified.');
+                    body.appendChild(warning);
                 }
                 filled++;
             }

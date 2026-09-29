@@ -235,6 +235,17 @@
             for (const entry of keyPackages) {
                 const material = fromBase64(entry.key_package);
                 const key = mls.MlsSession.key_package_signature_key(material);
+
+                // The directory says this device signs with one key; the key
+                // package it published is signed with another. Admitting it
+                // would create a member that revocation can never find, because
+                // revocation looks the device up by the advertised key. Refuse.
+                if (toBase64(key) !== entry.signature_public_key) {
+                    throw new Error(
+                        'A device published a key package that does not match its enrolled key, ' +
+                        'so it was not added'
+                    );
+                }
                 if (session.has_member(groupId, key)) {
                     skipped++;
                     continue;
@@ -243,20 +254,42 @@
                 // The epoch the group is in once this commit has been applied,
                 // not a placeholder: the server orders handshakes by it.
                 const epoch = Number(session.epoch(groupId));
-                await post('api/chat.php', {
+
+                // Our own state already moved to the new epoch when the commit
+                // was created, so an unpublished commit leaves everybody else
+                // behind. A review found both posts going unchecked while the
+                // caller was told the device had been admitted. Publication
+                // failure is now an error, and the conversation is marked as
+                // needing republication so nothing is sent from a state the
+                // others never saw.
+                const publishedCommit = await post('api/chat.php', {
                     action: 'post_handshake',
                     chat_id: chatId,
                     kind: 2,
                     epoch,
                     payload: toBase64(added.commit),
                 });
-                await post('api/chat.php', {
+                if (!publishedCommit || publishedCommit.success !== true) {
+                    unpublished.add(chatId);
+                    throw new Error(
+                        (publishedCommit && publishedCommit.message) ||
+                        'The group change could not be published, so this conversation needs to be rejoined'
+                    );
+                }
+                const publishedWelcome = await post('api/chat.php', {
                     action: 'post_handshake',
                     chat_id: chatId,
                     kind: 3,
                     epoch,
                     payload: toBase64(concat(lengthPrefixed(added.welcome), added.ratchet_tree)),
                 });
+                if (!publishedWelcome || publishedWelcome.success !== true) {
+                    unpublished.add(chatId);
+                    throw new Error(
+                        (publishedWelcome && publishedWelcome.message) ||
+                        'The invitation could not be published, so the new device cannot join yet'
+                    );
+                }
                 admitted++;
             }
             return { admitted, skipped };
@@ -312,6 +345,41 @@
         }
 
         /**
+         * Conversations this device must not send into.
+         *
+         * Two ways in: a group change we could not publish, so the others are
+         * behind a state we have already left; and a fork the engine reported,
+         * where we cannot say who is still a member. Both mean the same thing
+         * for sending — stop, and say why.
+         */
+        const unpublished = new Set();
+
+        function assertSendable(chatId, groupIdBase64) {
+            if (unpublished.has(chatId)) {
+                throw new Error(
+                    'A group change in this conversation was never published, so it must be rejoined ' +
+                    'before anything else is sent'
+                );
+            }
+            if (groupIdBase64 && session.has_diverged(fromBase64(groupIdBase64))) {
+                throw new Error(
+                    'This conversation has diverged from the rest of the group, so it must be rejoined ' +
+                    'before anything else is sent'
+                );
+            }
+        }
+
+        /** Why this device may not send, or null when it may. */
+        function sendingBlocked(chatId, groupIdBase64) {
+            try {
+                assertSendable(chatId, groupIdBase64);
+                return null;
+            } catch (error) {
+                return error.message;
+            }
+        }
+
+        /**
          * Where in the group a message was produced.
          *
          * The server keeps this to order handshakes and to refuse an epoch that
@@ -328,6 +396,7 @@
 
         async function send(chatId, groupIdBase64, text) {
             await requireSession();
+            assertSendable(chatId, groupIdBase64);
             const groupId = fromBase64(groupIdBase64);
             const sealed = session.seal(groupId, encoder.encode(text));
             const where = position(groupId);
@@ -369,16 +438,34 @@
             }
 
             const groupId = fromBase64(groupIdBase64);
+            // Who each signature key belongs to, so authorship can come from the
+            // protocol rather than from a column the server controls.
+            const directory = await participantKeyIndex(chatId);
             const messages = [];
             for (const envelope of response.envelopes) {
                 let text = null;
                 let readable = true;
+                let senderKey = null;
                 try {
                     const opened = session.open(groupId, fromBase64(envelope.ciphertext));
-                    text = decoder.decode(opened);
+                    text = decoder.decode(opened.plaintext);
+                    senderKey = opened.sender_key ? toBase64(opened.sender_key) : null;
                 } catch (error) {
                     readable = false;
                 }
+
+                // MLS says who wrote it. The row also says who wrote it. If they
+                // disagree, the row is wrong — and a review showed that changing
+                // that one field was enough to re-attribute authenticated
+                // content, so the disagreement has to be visible rather than
+                // resolved in the server's favour.
+                const authenticated = senderKey ? directory.get(senderKey) : undefined;
+                const claimedSenderId = Number(envelope.sender_id);
+                const authorship = !readable
+                    ? 'unknown'
+                    : (authenticated === undefined
+                        ? 'unverified'
+                        : (authenticated.userId === claimedSenderId ? 'verified' : 'mismatched'));
                 let attachment = null;
                 if (readable && envelope.content_type === 2) {
                     try {
@@ -394,7 +481,13 @@
                 }
                 messages.push({
                     messageId: envelope.message_id,
-                    senderId: envelope.sender_id,
+                    // The authenticated author where there is one; the claim is
+                    // kept separately so a caller cannot confuse them.
+                    senderId: authenticated ? authenticated.userId : null,
+                    claimedSenderId,
+                    senderDeviceId: authenticated ? authenticated.deviceId : null,
+                    senderKey,
+                    authorship,
                     createdAt: envelope.created_at,
                     contentType: envelope.content_type,
                     readable,
@@ -405,6 +498,32 @@
 
             await saveSession();
             return messages;
+        }
+
+        /**
+         * signature key (base64) -> { userId, deviceId, revoked } for everyone in
+         * this conversation.
+         *
+         * Cached per call chain rather than for the session: a device revoked a
+         * moment ago must not keep its place in this map.
+         */
+        async function participantKeyIndex(chatId) {
+            const response = await post('api/chat.php', {
+                action: 'list_participant_devices',
+                chat_id: chatId,
+            });
+            if (!response || response.success !== true) {
+                throw new Error((response && response.message) || 'Could not read the device directory');
+            }
+            const index = new Map();
+            for (const device of response.devices) {
+                index.set(device.signature_public_key, {
+                    userId: Number(device.user_id),
+                    deviceId: Number(device.device_id),
+                    revoked: device.revoked === true,
+                });
+            }
+            return index;
         }
 
         // ---- attachments ----------------------------------------------------
@@ -420,6 +539,7 @@
          */
         async function sendAttachment(chatId, groupIdBase64, fileName, bytes) {
             await requireSession();
+            assertSendable(chatId, groupIdBase64);
 
             const key = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
                 'encrypt',
@@ -679,12 +799,16 @@
                 payload: toBase64(commit),
             });
             if (!response || response.success !== true) {
+                // The removal took effect locally the moment it was created, so
+                // an unpublished one leaves us alone on a branch where the device
+                // is gone while everyone else still has it.
+                unpublished.add(chatId);
                 throw new Error((response && response.message) || 'Could not publish the removal');
             }
             return { epoch: where.epoch };
         }
 
-        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations };
+        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked };
     }
 
     // ---- small helpers -----------------------------------------------------

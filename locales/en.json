@@ -876,6 +876,9 @@
     "api.chat_is_protected": "This conversation is encrypted, so plaintext cannot be sent to it",
     "api.protection_state_unknown_send": "This conversation could not be checked for encryption; nothing was sent",
     "api.protected_edit_refused": "Messages in an encrypted conversation cannot be edited",
-    "api.protection_state_unknown_edit": "This conversation could not be checked for encryption; nothing was changed"
+    "api.protection_state_unknown_edit": "This conversation could not be checked for encryption; nothing was changed",
+    "protected.rejoin_required": "This conversation has to be rejoined before anything else is sent.",
+    "protected.author_mismatch": "This message was signed by a different account than the one shown.",
+    "protected.author_unverified": "The sender of this message could not be verified."
   }
 }
