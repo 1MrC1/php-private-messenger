@@ -12,9 +12,9 @@ server at all.
 |---|---|---|
 | **Someone who steals the database or a backup** | Full read of MySQL and `uploads/` | Defended. Message content is a sealed MLS envelope; attachments are AES-GCM ciphertext whose key travels inside the envelope. `messages.content` is the empty string. Nothing stored decrypts without a device's private state. |
 | **The server operator, passively** | Reads storage and all traffic, does not modify | Defended for content. **Not** for metadata: who talks to whom, when, how often, how large, and the membership of every group are all visible by construction. |
-| **The server operator, actively** | Adds a device, substitutes a key package, rewrites the directory, withholds or reorders handshakes | Partly defended, and this is the sharpest edge. The directory is a hash chain, so a *rewrite* of history is detectable. It is **not key transparency**: a server that lies consistently to a client which has never seen the truth is not caught by the chain. The safety number is what catches a substituted key — and only if two people actually compare it out of band. Withholding a handshake is a denial of service, not a read. |
+| **The server operator, actively** | Adds a device, substitutes a key package, rewrites the directory, withholds or reorders handshakes, lies about who sent what | Partly defended, and this is the sharpest edge. The directory is a hash chain, so a *rewrite* of history is detectable — but **no client verifies that chain today**, which a review pointed out and this table previously implied otherwise. It is **not key transparency**: a server that lies consistently to a client which has never seen the truth is not caught. The safety number catches a substituted key only if two people compare it out of band, and only within one conversation: it does not bind the group, so a welcome cross-routed between two conversations with the same members is invisible in it (open, #7). Authorship *is* now defended: the sender is the one MLS authenticated, and a row that disagrees is shown as mismatched. Withholding a handshake is a denial of service, not a read. |
 | **A network attacker** | Full control of the network, no valid certificate | Defended by TLS, then by MLS underneath it. |
-| **Someone holding a revoked or removed device** | All state that device ever had | Defended forward, not backward. It keeps what it already received — it holds those keys — and cannot read anything sent after the removal commit is published. Publishing that commit requires a remaining member to open the conversation. |
+| **Someone holding a revoked or removed device** | All state that device ever had | Defended forward, not backward, with two conditions a review made explicit. It keeps what it already received — it holds those keys. It cannot read anything sent after the removal commit is applied, *provided* the commit is published and the remaining members apply it: a competing commit from the same epoch used to be silently skipped, which left the device reading on the other branch, so a fork is now reported and sending stops until the conversation is rejoined. And the removal only happens when a remaining member opens the conversation, so a pending removal can sit unpublished while every other device is offline. |
 | **Cross-site scripting in the origin** | Runs script in the page | **Not defended.** This is stated rather than hedged: script in the origin reaches the WebAssembly memory and the IndexedDB handles while a tab is open. The content security policy (no inline script, no `eval`, `'wasm-unsafe-eval'` only), the node-building renderers, and the absence of any third-party script in `script-src` are what stand in the way. There is no second line behind them. |
 | **Someone with the device unlocked** | Local access to a logged-in browser | Not defended. The wrapping key is non-extractable, so raw key bytes cannot be exported, but the session can be used. |
 | **A malicious participant** | Is legitimately in the conversation | Out of scope by definition. They can read what they are sent and can screenshot it. |
@@ -64,11 +64,14 @@ A recovery file is AES-GCM over the device's exported session state under a key
 derived with PBKDF2-SHA512 at 600 000 iterations. Two decisions worth attacking
 in review:
 
-- **The passphrase is generated, not chosen** (~124 bits, unambiguous alphabet,
-  grouped for transcription). PBKDF2 is the strongest derivation a browser offers
-  without shipping more WebAssembly, and it is materially weaker against a GPU
-  than Argon2id. A generated passphrase does not depend on the derivation being
-  strong; a human-chosen one would.
+- **The passphrase is generated, not chosen** (118.9 bits: 24 characters drawn by
+  rejection sampling from a 31-symbol unambiguous alphabet, grouped for
+  transcription). PBKDF2 is the strongest derivation a browser offers without
+  shipping more WebAssembly, and it is materially weaker against a GPU than
+  Argon2id. A generated passphrase does not depend on the derivation being
+  strong; a human-chosen one would. *Corrected 2026-09-29: this said ~124 bits,
+  and the draw was `byte % 31`, which made eight symbols likelier than the other
+  twenty-three and cost about three bits of min-entropy.*
 - **The file is download-only.** The server never receives it. Handing it an
   encrypted copy would make the passphrase the only barrier for whoever holds the
   database — the very adversary the design is strongest against.

@@ -20,8 +20,17 @@ require_once __DIR__ . '/ProtectedChat.php';
  */
 final class EncryptedBlob
 {
-    /** Ciphertext travels as base64 in JSON, so the cap is deliberately modest. */
-    public const MAX_BLOB_BYTES = 8 * 1024 * 1024;
+    /**
+     * Ciphertext travels as base64 inside a JSON body, so the real ceiling is
+     * the endpoint's, not this constant.
+     *
+     * A review found these disagreeing: this said 8 MiB while
+     * `ProtectedChat::decodeBounded()` refused base64 over 65,536 characters and
+     * the endpoint capped the whole body at 128 KiB — an advertised limit of
+     * 8 MiB that was really about 49 KiB. One number now, matching what the
+     * transport actually allows, and the documentation says the same.
+     */
+    public const MAX_BLOB_BYTES = 48 * 1024;
     public const HOURLY_BLOB_BYTES = 64 * 1024 * 1024;
     public const HOURLY_BLOB_COUNT = 30;
 

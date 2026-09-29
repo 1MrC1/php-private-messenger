@@ -646,14 +646,29 @@
         async function createRecoveryFile() {
             await requireSession();
 
-            // 24 characters from an unambiguous alphabet, ~124 bits.
+            // 24 characters from a 31-symbol unambiguous alphabet: 118.9 bits.
+            //
+            // Rejection sampling, not `% 31`: a byte modulo 31 makes eight
+            // symbols likelier than the other twenty-three, which a review
+            // measured as costing three bits of min-entropy. Cheap to avoid, and
+            // a biased generator is the kind of thing nobody notices later.
             const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
-            const picks = randomBytes(24);
+            const limit = 256 - (256 % alphabet.length);   // 248: a whole number of alphabets
             let passphrase = '';
-            for (let index = 0; index < picks.length; index++) {
-                passphrase += alphabet[picks[index] % alphabet.length];
-                if (index % 6 === 5 && index !== picks.length - 1) {
-                    passphrase += '-';
+            let taken = 0;
+            while (taken < 24) {
+                for (const byte of randomBytes(32)) {
+                    if (byte >= limit) {
+                        continue;   // would bias the result; draw again
+                    }
+                    passphrase += alphabet[byte % alphabet.length];
+                    taken++;
+                    if (taken % 6 === 0 && taken !== 24) {
+                        passphrase += '-';
+                    }
+                    if (taken === 24) {
+                        break;
+                    }
                 }
             }
 

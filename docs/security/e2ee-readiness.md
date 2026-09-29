@@ -122,9 +122,20 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    digest matching whatever it served.
 
 9. **Verification, recovery and removal**: a safety number both sides can
-   compare out of band, derived from the group's exporter secret so it changes
-   if the membership does; a passphrase-protected recovery file, where the
-   passphrase is *generated* (~124 bits) rather than chosen, because the only
+   compare out of band — **a SHA-256 over the sorted member signature keys**,
+   which earlier versions of this document, and several commit messages,
+   wrongly described as derived from the group's exporter secret. It never was.
+   The consequence is a real gap a review found and this document previously
+   hid: the number changes when the membership does, but two differently keyed
+   groups with the same members produce the same number, so a cross-routed
+   welcome is not visible in it. That is open work, tracked in #7, and the box
+   for it is unticked again.
+
+   Also a passphrase-protected recovery file, where the
+   passphrase is *generated* (118.9 bits, by rejection sampling over a
+   31-symbol alphabet — an earlier `% 31` cost three bits of min-entropy, and
+   the figure of ~124 bits quoted here before was simply wrong) rather than
+   chosen, because the only
    key derivation a browser offers without more WebAssembly is PBKDF2 and a
    generated passphrase does not depend on the derivation being strong; and
    member removal, so a lost device stops being able to read.
@@ -267,3 +278,53 @@ Two related facts for whoever implements the protocol:
    replay, reordering, and rollback tests may the product claim E2EE. The tests
    pass across Chromium, Firefox and WebKit (`browser-interop.md`); the claim
    still waits on gate 5.
+
+## The 2026-09-29 review, and what it changed
+
+An adversarial review of commit `46cc789` found sixteen findings. It is the
+reason several statements above are now marked as corrections rather than
+claims, and the reason two boxes on #7 went back to unticked. The review report
+is not committed here — it describes defects, some still open — but every
+finding was reproduced before it was acted on.
+
+**Fixed.**
+
+- *Critical.* The ordinary send, upload and edit paths wrote plaintext into
+  protected conversations. `assertProtectionMatches()` guarded only the
+  protected path, so the mode boundary did not exist where the writes happened.
+  Reproduced against MySQL, including plaintext stored beside a genuine
+  envelope. The refusal now lives in `Chat` itself, and an undeterminable
+  protection state refuses too.
+- *High.* A competing commit from the same epoch was reported
+  `already-applied`, which silently skipped a genuine removal. Retries are now
+  recognised by exact digest, a stale different commit is a fork, and a forked
+  session stops sending.
+- *High.* MLS's authenticated sender was discarded in favour of the server's
+  `sender_id`. It is now returned, mapped through the directory, and a
+  disagreement is shown.
+- *High.* The directory's advertised key was never compared with the key inside
+  a key package, so a mismatch produced an unremovable device. Admission now
+  refuses the mismatch.
+- *High.* Admission ignored publication failures while reporting success.
+- *High.* Revocation was checked once per page-local record.
+- *Low.* The state parser accepted trailing bytes, duplicate keys and a length
+  that truncated to zero on wasm32; the recovery passphrase was drawn with
+  `% 31`; `compose.yaml` applied four of six migrations; the readiness probe
+  checked four of eight tables; the blob cap advertised 8 MiB while the
+  transport allowed about 49 KiB.
+
+**Open, and honestly open.**
+
+- The safety number does not bind the conversation, so two groups with the same
+  members and different keys look identical.
+- No client verifies the directory hash chain.
+- A reload loses the chat-to-group mapping and previously opened history.
+- Device state is keyed per origin, not per account, so an account switch in one
+  browser reuses the first account's signer.
+- Any authenticated account can exhaust another account's key packages.
+- The encrypted-blob quota is racy, and abandoned blobs are not cleaned up.
+- The attachment, recovery and later-device-admission helpers exist in the
+  client with no production interface calling them, which earlier text here
+  described as shipped. They are not.
+- `MessageIdempotency::envelopeFingerprint()` has no production caller, so the
+  protected retry path it was written for is not integrated.

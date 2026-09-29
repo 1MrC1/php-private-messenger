@@ -34,6 +34,8 @@ services:
       - ./migrations/20260808_encrypt_totp_secrets.sql:/docker-entrypoint-initdb.d/03-totp-encrypt.sql:ro
       - ./migrations/20260808_add_message_idempotency.sql:/docker-entrypoint-initdb.d/04-idempotency.sql:ro
       - ./migrations/20260928_add_chat_protection_and_envelopes.sql:/docker-entrypoint-initdb.d/05-protected-chats.sql:ro
+      - ./migrations/20260928_add_device_directory.sql:/docker-entrypoint-initdb.d/06-device-directory.sql:ro
+      - ./migrations/20260928_add_encrypted_blobs.sql:/docker-entrypoint-initdb.d/07-encrypted-blobs.sql:ro
       - db-data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root-development-only}"]

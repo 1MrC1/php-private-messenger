@@ -91,9 +91,15 @@ final class ProtectedChat
                 SELECT table_name
                 FROM information_schema.tables
                 WHERE table_schema = DATABASE()
-                  AND table_name IN ('chat_protection', 'message_envelopes', 'mls_groups', 'mls_handshake_messages')
+                  AND table_name IN (
+                        'chat_protection', 'message_envelopes', 'mls_groups', 'mls_handshake_messages',
+                        'e2ee_devices', 'e2ee_key_packages', 'e2ee_directory_log', 'encrypted_blobs'
+                      )
             ");
-            if ($tables === false || $tables->num_rows !== 4) {
+            // All eight, not the first four: a review found this advertising
+            // readiness while the device directory and blob tables were absent,
+            // which is a conversation that can be protected but never joined.
+            if ($tables === false || $tables->num_rows !== 8) {
                 return false;
             }
 
