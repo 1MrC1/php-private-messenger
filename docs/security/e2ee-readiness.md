@@ -122,14 +122,13 @@ Two pieces of groundwork have landed. Neither encrypts anything.
    digest matching whatever it served.
 
 9. **Verification, recovery and removal**: a safety number both sides can
-   compare out of band — **a SHA-256 over the sorted member signature keys**,
-   which earlier versions of this document, and several commit messages,
-   wrongly described as derived from the group's exporter secret. It never was.
-   The consequence is a real gap a review found and this document previously
-   hid: the number changes when the membership does, but two differently keyed
-   groups with the same members produce the same number, so a cross-routed
-   welcome is not visible in it. That is open work, tracked in #7, and the box
-   for it is unticked again.
+   compare out of band. Its history is worth keeping, because it is a lesson in
+   what a document can hide: this file and several commit messages described it
+   as derived from the group's exporter secret while the code hashed only the
+   sorted member signature keys, which is why two separately keyed groups with
+   the same members produced the same number. It now hashes the group id and a
+   secret exported from the group at its current epoch as well — so the
+   description is finally true, and the gap it hid is closed.
 
    Also a passphrase-protected recovery file, where the
    passphrase is *generated* (118.9 bits, by rejection sampling over a
@@ -264,10 +263,16 @@ Two related facts for whoever implements the protocol:
    support; validate official vectors and fuzz envelope parsing.~~ OpenMLS 0.9.0,
    pinned exactly and by checksum; 16 known-answer suites plus the reachable ones
    (`rfc9420-vectors.md`); envelopes and commits fuzzed.
-3. ~~Add versioned schema alongside the existing plaintext schema. No destructive
-   conversion and no automatic downgrade.~~ Done: `envelope_version`, protection
-   chosen at creation and irreversible, plaintext and envelopes refused in each
-   other's conversations.
+3. **Add versioned schema alongside the existing plaintext schema. No
+   destructive conversion and no automatic downgrade.** The schema half is done —
+   `envelope_version`, protection chosen at creation and irreversible, plaintext
+   and envelopes refused in each other's conversations, and since the second
+   review a database trigger that enforces it. "No automatic downgrade" was
+   marked complete twice and was wrong twice: first because only the protected
+   path checked, then because the check raced the write. It is not marked complete
+   again here. What can be said is what is tested: the paths that exist refuse,
+   the invariant is enforced in the database, and a client no longer takes the
+   server's word for whether a conversation is protected.
 4. ~~Ship opt-in test conversations with conspicuous verification and backup
    UX.~~ Done: opt-in at creation, an unaudited-encryption banner, a safety
    number to compare, a recovery file.
@@ -275,9 +280,14 @@ Two related facts for whoever implements the protocol:
    only gate left. `review-scope.md` is the brief: what to review, what tests
    already cover, and the claims worth attacking.
 6. Only after all supported clients pass interoperability, recovery, removal,
-   replay, reordering, and rollback tests may the product claim E2EE. The tests
-   pass across Chromium, Firefox and WebKit (`browser-interop.md`); the claim
-   still waits on gate 5.
+   replay, reordering, and rollback tests may the product claim E2EE. Where these
+   stand, honestly: interoperability passes across Chromium, Firefox and WebKit
+   (`browser-interop.md`); replay, reordering and rollback are covered by
+   `tests/mls_fuzz_runtime_test.js` and `tests/mls_fork_runtime_test.js`; removal
+   and recovery each failed a second review after being called done once, and are
+   now tested against those reproductions — which is evidence, not proof. The
+   claim waits on gate 5 regardless, and gate 5 is the one that decides whether
+   the rest of this list was read correctly.
 
 ## The 2026-09-29 review, and what it changed
 
@@ -347,6 +357,44 @@ finding was reproduced before it was acted on.
   admits devices the other account enrolled since, and a settings entry
   downloads or restores a recovery file.
 
+## The second review, the same day
+
+A second adversarial review took the first round's fixes apart and found eight
+more problems, most of them in the seams rather than in the cryptography. That is
+the useful shape of a review, and it is recorded here in full because a list of
+fixes without the failures that preceded them reads as confidence rather than
+history.
+
+- **The plaintext refusal had a race.** The check ran before the transaction that
+  wrote, so a send could pass it, protection could commit, and the plaintext
+  could commit afterwards. Both sides now take the same `chats` row lock and ask
+  again inside the transaction, and
+  `migrations/20260929_enforce_protected_plaintext.sql` puts the invariant in the
+  database, where no future call site can forget it.
+- **Authorship was still forgeable.** The chain hashed neither account nor
+  device, so the mapping from key to account came from the same response that was
+  lying. The preimage now binds entry type, account, device, public id and key;
+  the client recomputes it against the chain it has pinned and pins each key's
+  owner on first sighting.
+- **A removal could hide beyond the first page** of handshakes, and a message
+  beyond the first page of envelopes was never fetched at all. Both paths page
+  until the history runs out; a gap or an unreadable handshake stops this device
+  sending.
+- **A failed publication was forgotten on reload**, while the MLS state it
+  invalidated was durable. The block is sealed on the device now.
+- **Out-of-order delivery lost messages**, because the group kept no past epochs.
+  Eight are kept; the cost is in the threat model.
+- **The recovery file could not reopen anything**: it held the keys but not which
+  group each conversation used.
+- **Key-package exhaustion still worked**, because anyone who can start a
+  conversation satisfied the participation check. Claims are bounded per
+  claimant, per target, per hour, and replenishment finally has a caller.
+- **The client asked the server whether to encrypt.** Protection is irreversible,
+  so this device's own record now outranks the server's flag.
+- And **one of my own tests passed vacuously** — `\u{1F512}` is not PCRE syntax,
+  so the pattern never compiled and the assertion could not fail. It is fixed,
+  and it now proves it matches before it is trusted.
+
 **Still open.**
 
 - The independent cryptographic review (#7), which is external by definition.
@@ -354,4 +402,11 @@ finding was reproduced before it was acted on.
   finding; a documented position.
 - Forward secrecy and post-compromise security are whatever MLS gives for the
   epochs a device holds: nothing here forces a periodic key update.
-- The directory chain is not key transparency, and cannot become it here.
+- The directory chain is not key transparency, and cannot become it here. A
+  server that withholds an entry it has never shown cannot be caught by any
+  amount of chain walking; comparing safety numbers out of band is the answer,
+  and it only works if people do it.
+- A removal is published by whichever remaining device next opens the
+  conversation, so it can sit pending while they are all offline.
+- Eight past epochs of keys stay on the device, which is a deliberate trade for
+  not losing out-of-order messages.

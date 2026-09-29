@@ -55,20 +55,41 @@ re-deriving it, and which claims are worth attacking.
 - **Reproducibility**: rebuilding the WebAssembly reproduced the committed
   artifact byte for byte, and `test-utils` is confined to `[dev-dependencies]` —
   `crypto/BUILDING.md`.
-- **A previous adversarial review** (2026-09-29) and its sixteen findings, all
-  fixed: the mode boundary at every write, fork detection by exact commit
+- **Two previous adversarial reviews** (both 2026-09-29) and their findings.
+  The second one re-examined the first one's fixes and found several of them
+  incomplete, which is the most useful thing a review can do and the reason this
+  list is phrased carefully: *these areas have been attacked and changed*, not
+  *these areas are now correct*.
+
+  Round one: the mode boundary at every write, fork detection by exact commit
   reference, authenticated authorship, directory-to-key-package binding,
-  publication before success, revocation re-checked per open, the safety number
-  bound to the group, per-account device state, key-package exhaustion, the state
+  publication checked before success, revocation re-checked per open, the safety
+  number bound to the group and epoch, per-account device state, the state
   parser, the recovery file's authenticated header, reload persistence, chain
-  verification, ciphertext retry protection, blob linking and the unreachable
-  helpers. `e2ee-readiness.md` lists them; re-deriving them is not the best use
-  of a second reviewer.
+  verification, ciphertext retry protection, blob linking, and the helpers that
+  had no interface calling them.
+
+  Round two, all against round one's work: the protection check was outside the
+  transaction that wrote (a real race, reproduced), so both paths now lock the
+  conversation row and a database trigger holds the invariant; authorship was
+  still forgeable because the chain hashed neither account nor device; a removal
+  could hide beyond the first page of handshakes, and a message beyond the first
+  page of envelopes was never fetched; a failed publication was forgotten on
+  reload; a group kept no past epochs, so out-of-order delivery lost messages;
+  the recovery file did not carry the conversation mapping; key-package
+  exhaustion still worked; the client took protection from a server-controlled
+  DOM flag; and one of my own tests passed vacuously because its regular
+  expression did not compile.
+
+  What that second round should tell a reviewer: the interesting bugs here are in
+  the *gaps between* fixes — ordering, atomicity, pagination, durability — rather
+  than in the cryptography, which is OpenMLS's.
 
 ## Claims we would most like attacked
 
 1. The server cannot read message or attachment content in a protected
-   conversation, **even though it stores both**.
+   conversation, **even though it stores both**. Attacked twice already; both
+   times it was reachable. Worth a third attempt.
 2. Nothing in the protected path can be made to fall back to plaintext, in either
    direction, by any input a client or a malicious server can send.
 3. A device removed or revoked cannot read anything sent after the removal commit.
