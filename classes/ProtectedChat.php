@@ -122,6 +122,20 @@ final class ProtectedChat
                 return false;
             }
 
+            // The unique constraint is part of the claim defence, so readiness has
+            // to require it as well: a review dropped it and this still said yes.
+            $claimUnique = $this->conn->query("
+                SELECT COUNT(*) AS present
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'e2ee_key_packages'
+                  AND index_name = 'uniq_e2ee_key_packages_claim_scope'
+                  AND non_unique = 0
+            ");
+            if ($claimUnique === false || (int)($claimUnique->fetch_assoc()['present'] ?? 0) < 1) {
+                return false;
+            }
+
             $triggers = $this->conn->query("
                 SELECT COUNT(*) AS present
                 FROM information_schema.triggers

@@ -34,6 +34,65 @@ protectedAssert(
     'the plaintext fingerprint still distinguishes content'
 );
 
+// ---- the layer has to be connected to the application at all ---------------
+// A fifth review found the protected layer reading `window.currentChatId` and
+// `window.currentUserId`, neither of which exists: the legacy bundle keeps those
+// in top-level `let` bindings, which are lexical, not properties of `window`. So
+// every protected send fell through to the legacy plaintext sender in
+// production, while five rounds of suites passed because each injected its own
+// globals and none loaded the real files together.
+//
+// `tests/production_bridge_runtime_test.js` is the real guard — it loads the
+// actual scripts in one context. These assertions cover the same ground in the
+// PHP suite, which is what CI runs first.
+
+$bridgeUi = (string)file_get_contents($root . '/assets/js/protected-ui.js');
+$withoutComments = (string)preg_replace(['~/\*.*?\*/~s', '~//[^\n]*~'], ' ', $bridgeUi);
+protectedAssert(
+    !str_contains($withoutComments, 'window.currentChatId') &&
+        !str_contains($withoutComments, 'window.currentUserId'),
+    'the protected layer reads no window global that the application never defines'
+);
+protectedAssert(
+    str_contains($bridgeUi, "typeof currentChatId === 'undefined'") &&
+        str_contains($bridgeUi, "typeof currentUser === 'undefined'"),
+    'it reads the bundle\'s lexical bindings the way chat-ux.js does'
+);
+$chatUx = (string)file_get_contents($root . '/assets/js/chat-ux.js');
+protectedAssert(
+    str_contains($chatUx, "typeof currentChatId === 'undefined'"),
+    'which is the pattern the rest of the codebase already used'
+);
+protectedAssert(
+    str_contains($bridgeUi, 'if (activeChatId() !== chatId)'),
+    'and a conversation switch during the await abandons the send rather than misdirecting it'
+);
+protectedAssert(
+    strpos($bridgeUi, 'const pending = input ? input.value.trim()') !== false &&
+        strpos($bridgeUi, 'const pending = input ? input.value.trim()') <
+            strpos($bridgeUi, 'await ui.protectedForSend(chatId)'),
+    'the composer text is captured before the await, not after'
+);
+
+// A block is lifted by applying what it waits for, never by an empty answer.
+$clientForBlocks = (string)file_get_contents($root . '/assets/js/protected-chat.js');
+protectedAssert(
+    str_contains($clientForBlocks, 'const pendingSequence = new Map();') &&
+        str_contains($clientForBlocks, 'appliedSequences.has(waitingFor)'),
+    'an incomplete conversation records what it is waiting for, and only that lifts the block'
+);
+// Positions again, rather than a pattern with quotes inside quotes.
+$markAt = strpos($clientForBlocks, 'markProtected(chatId);');
+$requestAt = strpos($clientForBlocks, "action: 'protect_chat',");
+protectedAssert(
+    $markAt !== false && $requestAt !== false && $markAt < $requestAt,
+    'protection is marked before it is requested, so a lost answer cannot leave it unmarked'
+);
+protectedAssert(
+    str_contains($clientForBlocks, 'protect = { success: false, message: error.message };'),
+    'and a thrown transport error takes the same path as a refusal'
+);
+
 // ---- the routing decision, and what it depends on ---------------------------
 // Four rounds of review have found the same shape of defect: a defence that
 // depends on something which is not there, or which arrives too late. These pin

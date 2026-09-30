@@ -897,6 +897,7 @@
     "protected.admit_failed": "A device of the other account could not be added to this conversation.",
     "protected.attachment": "Encrypted file",
     "api.key_packages_required": "Key packages are required",
-    "api.handshake_messages_required": "Handshake messages are required"
+    "api.handshake_messages_required": "Handshake messages are required",
+    "protected.chat_changed": "The conversation changed while this message was being prepared. Nothing was sent."
   }
 }

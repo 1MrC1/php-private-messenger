@@ -897,6 +897,7 @@
     "protected.admit_failed": "对方账户的某台设备无法加入这个会话。",
     "protected.attachment": "加密文件",
     "api.key_packages_required": "需要密钥包",
-    "api.handshake_messages_required": "需要握手消息"
+    "api.handshake_messages_required": "需要握手消息",
+    "protected.chat_changed": "在准备这条消息时会话已切换，没有发送任何内容。"
   }
 }

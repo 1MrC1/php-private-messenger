@@ -897,6 +897,7 @@
     "protected.admit_failed": "No se pudo añadir a esta conversación un dispositivo de la otra cuenta.",
     "protected.attachment": "Archivo cifrado",
     "api.key_packages_required": "Se requieren paquetes de claves",
-    "api.handshake_messages_required": "Se requieren mensajes de negociación"
+    "api.handshake_messages_required": "Se requieren mensajes de negociación",
+    "protected.chat_changed": "La conversación cambió mientras se preparaba este mensaje. No se envió nada."
   }
 }

@@ -897,6 +897,7 @@
     "protected.admit_failed": "對方帳戶的某台裝置無法加入這個對話。",
     "protected.attachment": "加密檔案",
     "api.key_packages_required": "需要金鑰套件",
-    "api.handshake_messages_required": "需要交握訊息"
+    "api.handshake_messages_required": "需要交握訊息",
+    "protected.chat_changed": "在準備這則訊息時對話已切換，沒有傳送任何內容。"
   }
 }

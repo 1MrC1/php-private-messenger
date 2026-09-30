@@ -559,6 +559,72 @@ function fakeServer() {
         console.log('PASS: a deferred change that cannot be applied keeps the conversation blocked');
     }
 
+    // ---- an empty page does not lift a block -------------------------------
+    // A review cleared a removal block by returning an empty retry: "no more
+    // history" was read as "you are caught up".
+
+    {
+        const stuck = 96;
+        const late = build(61, memoryStorage());
+        await late.enroll({
+            identity: 'stuck@example', currentPassword: 'secret',
+            secondFactorCode: '616161', keyPackageCount: 4,
+        });
+        await server.post('api/chat.php', { action: 'protect_chat', chat_id: stuck, __userId: 61 });
+
+        const unusable = Buffer.from('a change this device cannot read').toString('base64');
+        server.handshakes.set(stuck, [{ sequence: 1, kind: 2, epoch: 1, payload: unusable }]);
+        await assert.rejects(() => late.syncGroup(stuck, 0), /could not be read/);
+        assert.ok(late.sendingBlocked(stuck, null), 'the conversation is blocked');
+
+        // The server now says there is nothing more. That must not be enough.
+        server.handshakes.set(stuck, []);
+        await assert.rejects(() => late.syncGroup(stuck, 0),
+            /still missing a group change/,
+            'an empty page does not lift the block');
+        assert.ok(late.sendingBlocked(stuck, null), 'and sending stays refused');
+        console.log('PASS: a block is only lifted by applying the change it waits for');
+    }
+
+    // ---- protection is marked before it is requested -----------------------
+    // If the server commits and the local write or the response is lost, a
+    // conversation is protected while this device thinks it is not.
+
+    {
+        const marker = (() => {
+            const values = new Map();
+            return {
+                getItem: (key) => (values.has(key) ? values.get(key) : null),
+                setItem: (key, value) => { values.set(key, String(value)); },
+                removeItem: (key) => { values.delete(key); },
+            };
+        })();
+        const lossyStore = memoryStorage();
+        const client = createProtectedClient({
+            accountId: 71,
+            storage: lossyStore,
+            localStore: marker,
+            crypto: webcrypto,
+            randomBytes: (length) => webcrypto.getRandomValues(new Uint8Array(length)),
+            post: (url, body) => (body.action === 'protect_chat'
+                // The server committed; the answer never arrived.
+                ? Promise.reject(new Error('the response was lost'))
+                : server.post(url, Object.assign({ __userId: 71 }, body))),
+            mls,
+        });
+        await client.enroll({
+            identity: 'lossy@example', currentPassword: 'secret',
+            secondFactorCode: '717171', keyPackageCount: 4,
+        });
+
+        await assert.rejects(() => client.startConversation(97, 71), /lost|protect/);
+        assert.equal(client.markedProtected(97), true,
+            'the conversation is marked protected even though the answer never came');
+        assert.ok(client.sendingBlocked(97, null),
+            'and it is blocked from sending until it is reopened, rather than treated as plaintext');
+        console.log('PASS: a lost protect_chat response leaves the conversation protected and blocked, not plaintext');
+    }
+
     // ---- the creator remembers its own conversation ------------------------
     // A fourth review found the one account that never wrote the protection
     // marker was the conversation's creator: it held the group in memory, and

@@ -194,7 +194,7 @@
         function currentAccountId() {
             return adapters.accountId !== undefined
                 ? adapters.accountId
-                : (typeof window === 'object' && window ? window.currentUserId : null);
+                    : lexicalAccountId();
         }
 
         /**
@@ -230,6 +230,26 @@
                 // Cannot ask; the synchronous answer above is all there is.
             }
             return false;
+        }
+
+        /**
+         * The signed-in account, read from the legacy bundle's lexical global.
+         *
+         * Not `window.currentUserId` — that never existed, which is how every
+         * account came to share one unscoped device record.
+         */
+        function lexicalAccountId() {
+            try {
+                // eslint-disable-next-line no-undef
+                if (typeof currentUser === 'undefined' || !currentUser) {
+                    return null;
+                }
+                // eslint-disable-next-line no-undef
+                const id = Number(currentUser.id);
+                return Number.isSafeInteger(id) && id > 0 ? id : null;
+            } catch (error) {
+                return null;
+            }
         }
 
         /**
@@ -307,7 +327,7 @@
             try {
                 const account = adapters.accountId !== undefined
                     ? adapters.accountId
-                    : (typeof window === 'object' && window ? window.currentUserId : null);
+                        : lexicalAccountId();
                 const key = 'pm-protected-chats' +
                     (account === null || account === undefined ? '' : ':' + account);
                 const raw = store.getItem(key);
@@ -607,6 +627,52 @@
         });
     }
 
+    /**
+     * The selected conversation and the signed-in account, read the way the rest
+     * of this codebase reads them.
+     *
+     * The legacy bundle declares `let currentChatId` and `let currentUser` at the
+     * top level of a classic script. That creates bindings in the global lexical
+     * scope, reachable by *name* from another classic script — but **not** as
+     * properties of `window`. This layer read `window.currentChatId`, which is
+     * permanently `undefined`, so every protected send fell through to the legacy
+     * plaintext sender and nothing was ever encrypted in production. Five rounds
+     * of review and a green suite did not catch it, because the tests injected
+     * their own globals and never loaded the real bundle beside the real layer.
+     *
+     * `chat-ux.js` had it right from the start; this now matches it.
+     */
+    function notify(message) {
+        if (typeof window.showToast === 'function') {
+            window.showToast(message, 'error');
+        }
+    }
+
+    function translateGlobal(key, fallback) {
+        return (window.PmI18n && typeof window.PmI18n.t === 'function'
+            ? window.PmI18n.t(key, {})
+            : null) || fallback;
+    }
+
+    function positiveInteger(value) {
+        const number = Number(value);
+        return Number.isSafeInteger(number) && number > 0 ? number : null;
+    }
+
+    function activeChatId() {
+        // eslint-disable-next-line no-undef
+        return positiveInteger(typeof currentChatId === 'undefined' ? null : currentChatId);
+    }
+
+    function activeAccountId() {
+        // eslint-disable-next-line no-undef
+        if (typeof currentUser === 'undefined' || !currentUser) {
+            return null;
+        }
+        // eslint-disable-next-line no-undef
+        return positiveInteger(currentUser.id);
+    }
+
     async function install() {
         if (!window.PmProtected) {
             return null;
@@ -622,7 +688,7 @@
                 });
                 try { return await response.json(); } catch (error) { return null; }
             },
-            clientFactory: () => window.PmProtected.browserClient(window.currentUserId || null),
+            clientFactory: () => window.PmProtected.browserClient(activeAccountId()),
             prompt: browserPrompt,
             notify: (message) => { if (typeof window.showToast === 'function') window.showToast(message, 'error'); },
             translate: (key, fallback) => (window.HiI18n && typeof window.HiI18n.t === 'function'
@@ -665,24 +731,40 @@
         const legacySend = window.sendMessage;
         if (typeof legacySend === 'function') {
             window.sendMessage = async function protectedAwareSend() {
-                const chatId = window.currentChatId;
+                const chatId = activeChatId();
                 if (!chatId) {
                     return legacySend.apply(this, arguments);
                 }
-                // Resolve first, route second. Nothing has been sent yet at this
-                // point, which is what makes awaiting safe.
                 const args = arguments;
                 const self = this;
+
+                // Take the text now, before the await. A review switched
+                // conversations while this was resolving and had the legacy
+                // sender transmit the new conversation's composer text into the
+                // old one.
+                const input = document.getElementById('messageInput');
+                const pending = input ? input.value.trim() : '';
+
+                // Resolve first, route second. Nothing has been sent yet at this
+                // point, which is what makes awaiting safe.
                 const protectedChat = await ui.protectedForSend(chatId);
+
+                // And the selection may have moved while we waited.
+                if (activeChatId() !== chatId) {
+                    notify(translateGlobal('protected.chat_changed',
+                        'The conversation changed while this message was being prepared. Nothing was sent.'));
+                    return undefined;
+                }
                 if (!protectedChat) {
                     return legacySend.apply(self, args);
                 }
-                const input = document.getElementById('messageInput');
-                const text = input ? input.value.trim() : '';
+                const text = pending;
                 if (!text) {
                     return undefined;
                 }
-                input.value = '';
+                if (input && input.value.trim() === text) {
+                    input.value = '';
+                }
                 return ui.send(chatId, text)
                     .then(() => { if (typeof window.loadMessages === 'function') window.loadMessages(chatId); })
                     .catch((error) => {
@@ -767,13 +849,19 @@
         const legacyFileSelect = window.handleFileSelect;
         if (typeof legacyFileSelect === 'function') {
             window.handleFileSelect = async function protectedAwareFileSelect(event) {
-                const chatId = window.currentChatId;
+                const chatId = activeChatId();
                 if (!chatId) {
                     return legacyFileSelect.apply(this, arguments);
                 }
                 const args = arguments;
                 const self = this;
-                if (!(await ui.protectedForSend(chatId))) {
+                const protectedChat = await ui.protectedForSend(chatId);
+                if (activeChatId() !== chatId) {
+                    notify(translateGlobal('protected.chat_changed',
+                        'The conversation changed while this message was being prepared. Nothing was sent.'));
+                    return undefined;
+                }
+                if (!protectedChat) {
                     return legacyFileSelect.apply(self, args);
                 }
                 const input = event && event.target;
@@ -797,7 +885,7 @@
         if (typeof legacyRender === 'function') {
             window.renderMessages = function protectedAwareRender() {
                 const result = legacyRender.apply(this, arguments);
-                const chatId = window.currentChatId;
+                const chatId = activeChatId();
                 if (chatId && ui.isProtected(chatId)) {
                     ui.decorateMessages(chatId).catch(() => {});
                     ui.showSafetyNumber(chatId).catch(() => {});

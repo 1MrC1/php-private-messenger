@@ -327,14 +327,44 @@
             }
 
             const groupId = session.create_group();
-            const protect = await post('api/chat.php', {
-                action: 'protect_chat',
-                chat_id: chatId,
-                group_id: toBase64(groupId),
-                cipher_suite: mls.ciphersuite(),
-            });
+
+            // Mark before asking, not after being told.
+            //
+            // A review pointed out both halves of this: if the server commits and
+            // the local write fails, nothing is marked; if the response is simply
+            // lost, the same. Protection is irreversible, so the only safe order
+            // is to treat the conversation as protected from the moment we are
+            // about to ask for it. A mark for a conversation that turns out not to
+            // be protected costs a refusal to send plaintext there — recoverable,
+            // and the opposite mistake is not.
+            markProtected(chatId);
+
+            // A thrown transport error and a refusal mean the same thing here —
+            // we do not know whether the server committed — so they take the same
+            // path. Letting the exception escape skipped the block entirely.
+            let protect = null;
+            try {
+                protect = await post('api/chat.php', {
+                    action: 'protect_chat',
+                    chat_id: chatId,
+                    group_id: toBase64(groupId),
+                    cipher_suite: mls.ciphersuite(),
+                });
+            } catch (error) {
+                protect = { success: false, message: error.message };
+            }
             if (!protect || protect.success !== true) {
-                throw new Error((protect && protect.message) || 'Could not protect the conversation');
+                // Definitely refused, or we cannot tell. Either way this device
+                // must not send plaintext there, and must not pretend it has a
+                // working group: block it until the conversation is reopened.
+                unpublished.add(Number(chatId));
+                pendingSequence.set(Number(chatId), 0);
+                incomplete.add(Number(chatId));
+                await saveBlocks();
+                throw new Error(
+                    (protect && protect.message) ||
+                    'Could not confirm that this conversation was protected; it must be reopened before use'
+                );
             }
 
             // Record it *here*, before admitting anyone. A fourth review found
@@ -470,6 +500,8 @@
             // Handshakes for a group this device has not joined yet, held in case
             // a welcome later in the queue makes them ours.
             const deferred = [];
+            /** Sequences this walk applied, so a block can only be lifted by one. */
+            const appliedSequences = new Set();
 
             async function replayDeferred() {
                 let newlyApplied = 0;
@@ -480,6 +512,7 @@
                         outcome = session.apply_handshake(entry.payload);
                     } catch (error) {
                         incomplete.add(Number(chatId));
+                        pendingSequence.set(Number(chatId), entry.sequence);
                         await saveBlocks();
                         throw new Error(
                             'A group change this device had set aside could not be applied (sequence ' +
@@ -488,6 +521,7 @@
                     }
                     if (outcome === 'applied') {
                         newlyApplied++;
+                        appliedSequences.add(entry.sequence);
                     }
                 }
                 return newlyApplied;
@@ -516,6 +550,7 @@
                     const sequence = Number(entry.sequence);
                     if (sequence !== lastSequence + 1) {
                         incomplete.add(Number(chatId));
+                        pendingSequence.set(Number(chatId), sequence);
                         await saveBlocks();
                         throw new Error(
                             'The group history for this conversation has a gap at ' + sequence +
@@ -567,6 +602,7 @@
                         outcome = session.apply_handshake(payload);
                     } catch (error) {
                         incomplete.add(Number(chatId));
+                        pendingSequence.set(Number(chatId), sequence);
                         await saveBlocks();
                         throw new Error(
                             'A group change in this conversation could not be read (sequence ' + sequence +
@@ -575,6 +611,7 @@
                     }
                     if (outcome === 'applied') {
                         applied++;
+                        appliedSequences.add(sequence);
                     } else if (outcome === 'unknown-group') {
                         // Keep it rather than stepping over it. This device may be
                         // about to join from a welcome later in the same queue, and
@@ -588,6 +625,7 @@
 
             if (!complete) {
                 incomplete.add(Number(chatId));
+                pendingSequence.set(Number(chatId), lastSequence + 1);
                 await saveBlocks();
                 throw new Error('This conversation has more group history than could be fetched at once');
             }
@@ -604,8 +642,23 @@
                     'be rejoined before anything else is sent'
                 );
             }
-            if (incomplete.delete(Number(chatId))) {
-                await saveBlocks();
+            // Only lift the block when the change it was waiting for has actually
+            // been applied. An empty page means the server has nothing more to
+            // say, which is not the same as this device being caught up — that
+            // difference is what a review used to clear a removal block.
+            const waitingFor = pendingSequence.get(Number(chatId));
+            if (incomplete.has(Number(chatId))) {
+                if (waitingFor !== undefined && appliedSequences.has(waitingFor)) {
+                    incomplete.delete(Number(chatId));
+                    pendingSequence.delete(Number(chatId));
+                    await saveBlocks();
+                } else {
+                    throw new Error(
+                        'This conversation is still missing a group change (sequence ' +
+                        (waitingFor === undefined ? 'unknown' : waitingFor) +
+                        '), so it must be rejoined before anything else is sent'
+                    );
+                }
             }
             // Whatever is left belongs to a group this device is not in and never
             // joined during this walk, which is normal for a shared queue.
@@ -639,6 +692,15 @@
         const unpublished = new Set();
         /** Conversations whose group history could not be fetched completely. */
         const incomplete = new Set();
+        /**
+         * The sequence each incomplete conversation is waiting to account for.
+         *
+         * A review cleared a block by returning an empty page: "no more history"
+         * looked like "you are caught up". A block is only lifted when the change
+         * that caused it has actually been applied, so the reason is remembered
+         * rather than the flag alone.
+         */
+        const pendingSequence = new Map();
 
         /**
          * Reasons not to send, kept on the device rather than in the page.
@@ -658,12 +720,16 @@
             for (const chatId of stored.incomplete || []) {
                 incomplete.add(Number(chatId));
             }
+            for (const [chatId, sequence] of Object.entries(stored.pending || {})) {
+                pendingSequence.set(Number(chatId), Number(sequence));
+            }
         }
 
         async function saveBlocks() {
             await writeSealed(blockedId, {
                 unpublished: Array.from(unpublished),
                 incomplete: Array.from(incomplete),
+                pending: Object.fromEntries(pendingSequence),
             });
         }
 
