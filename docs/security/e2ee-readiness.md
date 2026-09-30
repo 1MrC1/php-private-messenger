@@ -276,9 +276,12 @@ Two related facts for whoever implements the protocol:
 4. ~~Ship opt-in test conversations with conspicuous verification and backup
    UX.~~ Done: opt-in at creation, an unaudited-encryption banner, a safety
    number to compare, a recovery file.
-5. **Commission an independent protocol and implementation audit.** Open, and the
-   only gate left. `review-scope.md` is the brief: what to review, what tests
-   already cover, and the claims worth attacking.
+5. **Commission an independent protocol and implementation audit.** Open.
+   `review-scope.md` is the brief: what to review, what four rounds of automated
+   review already found, and the claims worth attacking. This is not "the only
+   gate left" — that phrasing was in this document while gate 3 was explicitly
+   incomplete, which is precisely the kind of overclaim these reviews keep
+   catching.
 6. Only after all supported clients pass interoperability, recovery, removal,
    replay, reordering, and rollback tests may the product claim E2EE. Where these
    stand, honestly: interoperability passes across Chromium, Firefox and WebKit
@@ -432,6 +435,38 @@ any of the individual fixes: the defects are in the seams — a method that is n
 there, a check on one path and not its twin, an await in a decision that cannot
 wait, a cap above the supply it bounds, an invariant enforced in one direction.
 None of them were cryptography.
+
+## The fourth review
+
+A fourth round checked the third round's work and found four more. Written out
+because the shape has now repeated four times and the shape is the finding:
+
+- **The conversation's creator never recorded its own conversation.** Every other
+  device learned protection from a welcome; the creator held the group in memory
+  only, so after a reload the server's flag was the last word and a false flag
+  won. Recorded now between protecting and admitting, and re-derived on resume.
+- **The routing decision still read that flag synchronously** before any local
+  lookup could answer. Both send paths await the decision now; awaiting is safe
+  only because nothing is sent until it resolves.
+- **A deferred group change that failed to apply was forgiven**, because the
+  catch around the welcome wrapped the replay as well. The catch covers joining
+  only, and the block survives.
+- **Concurrent claims defeated the reuse check and the cap**, which sat outside
+  the transaction that acted on them. One transaction, device rows locked first,
+  plus a unique constraint.
+- **Readiness accepted a schema with the tables and none of the backstop.** It
+  checks the claim column and all three triggers now.
+
+Four rounds, and not one finding in the cryptography. Every one was a dependency
+that was missing, late, or in the wrong order: a method that did not exist, a
+record never written, a check outside its transaction, a catch too wide, a cap
+above the supply, a schema gate that looked at half the schema.
+
+**A note on what this means for the gate.** After four rounds of "fixed" being
+incomplete, the useful conclusion is not that the next round will be clean. It is
+that this project's own sign-off — mine included, and most of this code is mine —
+is not evidence about these guarantees. That is what gate 5 is for, and nothing
+here should be read as an argument for skipping it.
 
 **Still open.**
 

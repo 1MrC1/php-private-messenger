@@ -89,11 +89,27 @@ re-deriving it, and which claims are worth attacking.
   pre-send guard text had; recovery clearing a send block; a key-package cap
   larger than the supply it bounded; and a one-sided database invariant.
 
-  What three rounds should tell a reviewer: the interesting bugs here are in the
-  *seams* — a method that is not there, a check on one path and not its twin, an
-  await in a decision that cannot wait, a cap above the supply, an invariant
-  enforced in one direction — and not in the cryptography, which is OpenMLS's.
-  Start by asking what each defence depends on, and whether that thing exists.
+  Round four, against round three's work: the conversation's creator never
+  recorded its own conversation, so a reload left the server's flag as the last
+  word; the routing decision still read that flag before any local lookup; a
+  deferred group change that failed to apply was swallowed by a catch meant for
+  the welcome; concurrent claims defeated both the reuse check and the cap because
+  both sat outside the transaction; and readiness accepted a schema with the
+  tables and none of the triggers.
+
+  What four rounds should tell a reviewer: **not one finding was in the
+  cryptography.** Every one was a dependency missing, late, or out of order — a
+  method that did not exist, a record never written, a check outside its
+  transaction, a catch too wide, a cap above the supply it bounded, a schema gate
+  that looked at half the schema. Start by asking, for each defence: what does
+  this depend on, does that thing exist, and does it happen before the thing it is
+  supposed to prevent?
+
+  Also worth knowing: each round's fixes were accompanied by passing suites. The
+  tests encoded the reported attack rather than the property, which is why close
+  variants kept working. `tests/protected_chat_test.php` now asserts dependencies
+  and orderings for that reason, but treat the suite as a record of what has been
+  attacked, never as evidence that the guarantee holds.
 
 ## Claims we would most like attacked
 
