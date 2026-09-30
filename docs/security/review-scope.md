@@ -105,11 +105,20 @@ re-deriving it, and which claims are worth attacking.
   this depend on, does that thing exist, and does it happen before the thing it is
   supposed to prevent?
 
-  Also worth knowing: each round's fixes were accompanied by passing suites. The
-  tests encoded the reported attack rather than the property, which is why close
-  variants kept working. `tests/protected_chat_test.php` now asserts dependencies
-  and orderings for that reason, but treat the suite as a record of what has been
-  attacked, never as evidence that the guarantee holds.
+  Round five found the largest one: **the layer was never connected.** It read
+  `window.currentChatId` and `window.currentUserId`, which the application never
+  defines — its state lives in top-level `let` bindings, lexical rather than on
+  `window` — so no protected send was ever routed into encryption in production,
+  and every account shared one device record. Eight green suites throughout,
+  because every test injected its own globals and none loaded the real files
+  together.
+
+  Start with `tests/production_bridge_runtime_test.js`, which now loads the real
+  scripts in one context, and then ask the same question of everything else:
+  **is this defence actually reachable from the running application?** Five rounds
+  say that is the question with the best yield, ahead of any question about the
+  protocol. Treat the suite as a record of what has been attacked, never as
+  evidence that a guarantee holds.
 
 ## Claims we would most like attacked
 

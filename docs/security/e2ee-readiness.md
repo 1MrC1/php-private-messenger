@@ -468,6 +468,36 @@ that this project's own sign-off — mine included, and most of this code is min
 is not evidence about these guarantees. That is what gate 5 is for, and nothing
 here should be read as an argument for skipping it.
 
+## The fifth review
+
+The fifth round found that **none of the previous four rounds had been protecting
+anything in production.** The layer read `window.currentChatId` and
+`window.currentUserId`; the application keeps those in top-level `let` bindings,
+which are lexical and not properties of `window`. So every protected send fell
+through to the legacy plaintext sender, and every account shared one unscoped
+device record.
+
+Eight suites were green throughout, because each test injected its own globals
+and none loaded the real bundle beside the real layer. The tests described a
+wiring diagram; nothing tested the wiring.
+
+`tests/production_bridge_runtime_test.js` now loads the real scripts in one
+shared context and fails on that exact bug, which was checked by reintroducing
+it. The other four findings — a conversation switch during the await, an empty
+page lifting a removal block, protection separable from its local record, and
+readiness accepting a schema without the unique claim constraint — are fixed and
+verified.
+
+**What five rounds say about this document.** Every section above was written
+after a round that looked finished, and each was then falsified. The sections are
+kept as a record rather than rewritten, because the pattern is the most useful
+thing here: **thirty-eight findings, none of them in the cryptography.** All of
+them dependencies that were missing, late, or out of order — and the largest was
+a defence that was never connected to the product at all.
+
+Nothing in this document should be read as an assurance. It is a list of what has
+been attacked and what was done about it.
+
 **Still open.**
 
 - The independent cryptographic review (#7), which is external by definition.
