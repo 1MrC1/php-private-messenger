@@ -113,12 +113,22 @@ re-deriving it, and which claims are worth attacking.
   because every test injected its own globals and none loaded the real files
   together.
 
-  Start with `tests/production_bridge_runtime_test.js`, which now loads the real
-  scripts in one context, and then ask the same question of everything else:
-  **is this defence actually reachable from the running application?** Five rounds
-  say that is the question with the best yield, ahead of any question about the
-  protocol. Treat the suite as a record of what has been attacked, never as
-  evidence that a guarantee holds.
+  Round six found four more, including one about the test above: it passed with
+  `activeChatId()` hard-wired to `null`, because it checked that bindings existed
+  rather than that a send was routed. It drives a real send now and fails under
+  both forms of the original bug. Also: a swallowed storage failure still allowed
+  plaintext routing, a block bound to the server-chosen sequence number could be
+  cleared by relabelling a different valid commit, and readiness checked an index
+  name rather than its columns.
+
+  **Two questions with the best yield, in order.** First: is this defence
+  reachable from the running application, and does a test *drive* it rather than
+  describe it? Second: what does the defence key on, and who controls that value?
+  Six rounds say almost everything found lives in one of those two answers.
+
+  A specific invitation: **mutate the code and see whether the suite notices.**
+  Three of the findings so far were tests that could not fail. Treat the suite as
+  a record of what has been attacked, never as evidence that a guarantee holds.
 
 ## Claims we would most like attacked
 

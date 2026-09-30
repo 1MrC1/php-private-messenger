@@ -498,6 +498,43 @@ a defence that was never connected to the product at all.
 Nothing in this document should be read as an assurance. It is a list of what has
 been attacked and what was done about it.
 
+## The sixth review
+
+Round six found four more, and the one worth leading with is about the test I had
+defended in the previous round as the real fix.
+
+- **The bridge test was hollow.** The reviewer changed `activeChatId()` to return
+  `null` and every check still passed, because the test verified that bindings
+  existed and wrappers were installed and never invoked a send. It now drives a
+  send through the installed wrapper and asserts the encrypting client was called
+  once and the legacy sender not at all. My first attempt at that addition let the
+  process exit before its promise settled — passing while skipping the
+  assertion — which is the same defect one level down.
+- **A failed marker write still allowed plaintext routing**, because the write
+  swallowed failures and nothing consulted the durable block that had succeeded.
+  The sealed record is now written before the server is asked, the request does
+  not happen if that write fails, and any protection-related block counts as
+  evidence the conversation is protected.
+- **A relabelled commit could clear a removal block.** The block bound to the
+  sequence number, which the server chooses. Blocks bind to the payload digest
+  now; a genuinely corrupt commit never lifts one, and the conversation is
+  recorded as needing a rejoin.
+- **Readiness checked an index name, not a constraint.** It compares columns and
+  order now.
+
+**Six rounds, forty-two findings, none in the cryptography.** The running total of
+what has actually gone wrong: a method that did not exist, a record never written,
+a check outside its transaction, a catch too wide, a cap above the supply it
+bounded, an invariant enforced in one direction, a layer never connected to the
+application, a block keyed to data the attacker controls, a storage failure
+swallowed — and three tests that could not fail.
+
+That last category is the one to watch. Every round I have written a test I
+believed closed a class, and twice the test itself was the thing that needed
+fixing. If you are reading this to decide whether the feature is safe, the answer
+this document can honestly give is: it has been attacked six times, it changed
+every time, and nobody independent has looked yet.
+
 **Still open.**
 
 - The independent cryptographic review (#7), which is external by definition.
