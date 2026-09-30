@@ -580,10 +580,42 @@ function fakeServer() {
         // The server now says there is nothing more. That must not be enough.
         server.handshakes.set(stuck, []);
         await assert.rejects(() => late.syncGroup(stuck, 0),
-            /still missing a group change/,
+            /must be rejoined/,
             'an empty page does not lift the block');
         assert.ok(late.sendingBlocked(stuck, null), 'and sending stays refused');
         console.log('PASS: a block is only lifted by applying the change it waits for');
+    }
+
+    // ---- a relabelled commit cannot clear a block --------------------------
+    // The block used to bind to the sequence number, which the server chooses. A
+    // review blocked a device on sequence S with a corrupted removal, then
+    // relabelled a *different* valid commit as S: applying it cleared the block,
+    // and the removed device kept reading. The block binds to the payload's
+    // digest now, so only those exact bytes lift it.
+
+    {
+        const substituted = 98;
+        const observer = build(81, memoryStorage());
+        await observer.enroll({
+            identity: 'observer@example', currentPassword: 'secret',
+            secondFactorCode: '818181', keyPackageCount: 4,
+        });
+        await server.post('api/chat.php', { action: 'protect_chat', chat_id: substituted, __userId: 81 });
+
+        const corrupted = Buffer.from('a removal this device cannot read').toString('base64');
+        server.handshakes.set(substituted, [{ sequence: 1, kind: 2, epoch: 1, payload: corrupted }]);
+        await assert.rejects(() => observer.syncGroup(substituted, 0), /could not be read/);
+        assert.ok(observer.sendingBlocked(substituted, null), 'the observer is blocked');
+
+        // The server now offers a different payload under the same sequence.
+        const different = Buffer.from('an entirely different change').toString('base64');
+        server.handshakes.set(substituted, [{ sequence: 1, kind: 2, epoch: 1, payload: different }]);
+        await assert.rejects(() => observer.syncGroup(substituted, 0),
+            /could not be read|must be rejoined/,
+            'a different payload under the same sequence does not satisfy the block');
+        assert.ok(observer.sendingBlocked(substituted, null),
+            'and the conversation stays blocked, so nothing is sent on a branch it cannot account for');
+        console.log('PASS: relabelling a different commit with the blocked sequence does not lift the block');
     }
 
     // ---- protection is marked before it is requested -----------------------

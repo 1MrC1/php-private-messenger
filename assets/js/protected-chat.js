@@ -139,7 +139,11 @@
                 // Protection cannot be turned off once a conversation has it, so a
                 // device that has ever seen a group for this conversation records
                 // that fact and never asks the server again.
-                protected: existing.protected === true || !!(groupIdBase64 || existing.groupId),
+                // `protected` is sticky and is set by intent as well as by
+                // evidence: `startConversation()` writes this record *before* the
+                // group exists anywhere, precisely so a lost answer cannot leave
+                // the conversation looking like plaintext.
+                protected: true,
                 groupId: groupIdBase64 || existing.groupId || null,
                 lastSequence: (cursors && cursors.lastSequence !== undefined)
                     ? cursors.lastSequence
@@ -328,7 +332,8 @@
 
             const groupId = session.create_group();
 
-            // Mark before asking, not after being told.
+            // Two records before the server is asked, and the request does not
+            // happen unless the durable one succeeded.
             //
             // A review pointed out both halves of this: if the server commits and
             // the local write fails, nothing is marked; if the response is simply
@@ -337,7 +342,20 @@
             // about to ask for it. A mark for a conversation that turns out not to
             // be protected costs a refusal to send plaintext there — recoverable,
             // and the opposite mistake is not.
-            markProtected(chatId);
+            // The sealed record is the one that has to be there. If it cannot be
+            // written we have not protected anything yet, so nothing is asked of
+            // the server and the conversation stays plainly unprotected — which
+            // is recoverable, unlike a protected conversation this device does
+            // not know about.
+            try {
+                await rememberConversation(chatId, null, {});
+            } catch (error) {
+                throw new Error(
+                    'This device could not record the conversation before protecting it, so nothing ' +
+                    'was changed. Check that browser storage is available and try again.'
+                );
+            }
+            const marked = markProtected(chatId);
 
             // A thrown transport error and a refusal mean the same thing here —
             // we do not know whether the server committed — so they take the same
@@ -358,8 +376,8 @@
                 // must not send plaintext there, and must not pretend it has a
                 // working group: block it until the conversation is reopened.
                 unpublished.add(Number(chatId));
-                pendingSequence.set(Number(chatId), 0);
                 incomplete.add(Number(chatId));
+                pendingRejoin.add(Number(chatId));
                 await saveBlocks();
                 throw new Error(
                     (protect && protect.message) ||
@@ -500,8 +518,8 @@
             // Handshakes for a group this device has not joined yet, held in case
             // a welcome later in the queue makes them ours.
             const deferred = [];
-            /** Sequences this walk applied, so a block can only be lifted by one. */
-            const appliedSequences = new Set();
+            /** Digests of payloads this walk applied. Content, not server metadata. */
+            const appliedDigests = new Set();
 
             async function replayDeferred() {
                 let newlyApplied = 0;
@@ -512,7 +530,7 @@
                         outcome = session.apply_handshake(entry.payload);
                     } catch (error) {
                         incomplete.add(Number(chatId));
-                        pendingSequence.set(Number(chatId), entry.sequence);
+                        pendingPayload.set(Number(chatId), await payloadDigest(entry.payload));
                         await saveBlocks();
                         throw new Error(
                             'A group change this device had set aside could not be applied (sequence ' +
@@ -521,7 +539,7 @@
                     }
                     if (outcome === 'applied') {
                         newlyApplied++;
-                        appliedSequences.add(entry.sequence);
+                        appliedDigests.add(await payloadDigest(entry.payload));
                     }
                 }
                 return newlyApplied;
@@ -550,7 +568,7 @@
                     const sequence = Number(entry.sequence);
                     if (sequence !== lastSequence + 1) {
                         incomplete.add(Number(chatId));
-                        pendingSequence.set(Number(chatId), sequence);
+                        pendingRejoin.add(Number(chatId));
                         await saveBlocks();
                         throw new Error(
                             'The group history for this conversation has a gap at ' + sequence +
@@ -602,7 +620,7 @@
                         outcome = session.apply_handshake(payload);
                     } catch (error) {
                         incomplete.add(Number(chatId));
-                        pendingSequence.set(Number(chatId), sequence);
+                        pendingPayload.set(Number(chatId), await payloadDigest(payload));
                         await saveBlocks();
                         throw new Error(
                             'A group change in this conversation could not be read (sequence ' + sequence +
@@ -611,7 +629,7 @@
                     }
                     if (outcome === 'applied') {
                         applied++;
-                        appliedSequences.add(sequence);
+                        appliedDigests.add(await payloadDigest(payload));
                     } else if (outcome === 'unknown-group') {
                         // Keep it rather than stepping over it. This device may be
                         // about to join from a welcome later in the same queue, and
@@ -625,7 +643,7 @@
 
             if (!complete) {
                 incomplete.add(Number(chatId));
-                pendingSequence.set(Number(chatId), lastSequence + 1);
+                pendingRejoin.add(Number(chatId));
                 await saveBlocks();
                 throw new Error('This conversation has more group history than could be fetched at once');
             }
@@ -646,17 +664,17 @@
             // been applied. An empty page means the server has nothing more to
             // say, which is not the same as this device being caught up — that
             // difference is what a review used to clear a removal block.
-            const waitingFor = pendingSequence.get(Number(chatId));
             if (incomplete.has(Number(chatId))) {
-                if (waitingFor !== undefined && appliedSequences.has(waitingFor)) {
+                const waitingFor = pendingPayload.get(Number(chatId));
+                const satisfied = waitingFor !== undefined && appliedDigests.has(waitingFor);
+                if (satisfied && !pendingRejoin.has(Number(chatId))) {
                     incomplete.delete(Number(chatId));
-                    pendingSequence.delete(Number(chatId));
+                    pendingPayload.delete(Number(chatId));
                     await saveBlocks();
                 } else {
                     throw new Error(
-                        'This conversation is still missing a group change (sequence ' +
-                        (waitingFor === undefined ? 'unknown' : waitingFor) +
-                        '), so it must be rejoined before anything else is sent'
+                        'This conversation is missing a group change this device could not apply, so it ' +
+                        'must be rejoined before anything else is sent'
                     );
                 }
             }
@@ -693,14 +711,21 @@
         /** Conversations whose group history could not be fetched completely. */
         const incomplete = new Set();
         /**
-         * The sequence each incomplete conversation is waiting to account for.
+         * What each incomplete conversation is waiting to account for, by content.
          *
-         * A review cleared a block by returning an empty page: "no more history"
-         * looked like "you are caught up". A block is only lifted when the change
-         * that caused it has actually been applied, so the reason is remembered
-         * rather than the flag alone.
+         * First this was a flag, and an empty page cleared it. Then it was the
+         * sequence number — and a review relabelled a *different* valid commit
+         * with that sequence, which cleared the block and let the removed device
+         * keep reading. The sequence is the server's to choose; the bytes are not.
+         *
+         * So the block records the digest of the payload that failed, and only
+         * applying that exact payload lifts it. A genuinely corrupt commit
+         * therefore never lifts it, which is correct: that conversation needs to
+         * be rejoined, and `pendingRejoin` says so.
          */
-        const pendingSequence = new Map();
+        const pendingPayload = new Map();
+        /** Conversations that cannot recover without being rejoined. */
+        const pendingRejoin = new Set();
 
         /**
          * Reasons not to send, kept on the device rather than in the page.
@@ -720,8 +745,11 @@
             for (const chatId of stored.incomplete || []) {
                 incomplete.add(Number(chatId));
             }
-            for (const [chatId, sequence] of Object.entries(stored.pending || {})) {
-                pendingSequence.set(Number(chatId), Number(sequence));
+            for (const [chatId, digest] of Object.entries(stored.pending || {})) {
+                pendingPayload.set(Number(chatId), String(digest));
+            }
+            for (const chatId of stored.rejoin || []) {
+                pendingRejoin.add(Number(chatId));
             }
         }
 
@@ -729,7 +757,8 @@
             await writeSealed(blockedId, {
                 unpublished: Array.from(unpublished),
                 incomplete: Array.from(incomplete),
-                pending: Object.fromEntries(pendingSequence),
+                pending: Object.fromEntries(pendingPayload),
+                rejoin: Array.from(pendingRejoin),
             });
         }
 
@@ -740,7 +769,7 @@
                     'before anything else is sent'
                 );
             }
-            if (incomplete.has(Number(chatId))) {
+            if (incomplete.has(Number(chatId)) || pendingRejoin.has(Number(chatId))) {
                 throw new Error(
                     'The group history for this conversation could not be fetched completely, so it must ' +
                     'be rejoined before anything else is sent'
@@ -965,6 +994,16 @@
             if (markedProtected(chatId)) {
                 return true;
             }
+            // A protection-related block is itself evidence: it only exists
+            // because this device was in the middle of protecting or repairing
+            // this conversation. A review reached a plaintext route by failing
+            // the marker write while one of these blocks was stored happily.
+            if (unpublished.has(Number(chatId)) ||
+                incomplete.has(Number(chatId)) ||
+                pendingRejoin.has(Number(chatId))) {
+                markProtected(chatId);
+                return true;
+            }
             const recalled = await recallConversation(chatId);
             const known = !!(recalled && (recalled.protected === true || recalled.groupId));
             if (known) {
@@ -987,6 +1026,12 @@
             }
         }
 
+        /** The identity of a handshake payload: its bytes, not its label. */
+        async function payloadDigest(payload) {
+            const bytes = payload instanceof Uint8Array ? payload : fromBase64(String(payload));
+            return toBase64(new Uint8Array(await subtle.digest('SHA-256', bytes)));
+        }
+
         function localStore() {
             if (adapters.localStore) {
                 return adapters.localStore;
@@ -998,10 +1043,17 @@
             return 'pm-protected-chats' + scope;
         }
 
+        /**
+         * Record that a conversation is protected. Returns whether it stuck.
+         *
+         * It used to swallow a storage failure, which a review turned into a
+         * plaintext route: the mark silently did not happen, nothing else
+         * consulted anything that had, and a false server flag then won.
+         */
         function markProtected(chatId) {
             const store = localStore();
             if (!store) {
-                return;
+                return false;
             }
             try {
                 const current = markedList(store);
@@ -1009,9 +1061,10 @@
                     current.push(Number(chatId));
                     store.setItem(markerKey(), JSON.stringify(current));
                 }
+                // Read it back: a quota-exceeded write can throw nothing at all.
+                return markedList(store).includes(Number(chatId));
             } catch (error) {
-                // Storage denied: the device still works, it just cannot remember
-                // this across page loads.
+                return false;
             }
         }
 

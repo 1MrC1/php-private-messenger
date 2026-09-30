@@ -198,6 +198,82 @@ const fileWrapperInstalled = vm.runInContext(
 assert.equal(fileWrapperInstalled, true, 'and the protected attachment wrapper too');
 console.log('PASS: the protected wrappers are installed and read the real selection');
 
-console.log('Production bridge tests passed.');
-// Nothing here waits on a timer; exit before the i18n loader's does.
-process.exit(0);
+// ---- and it has to actually route a send --------------------------------
+// The checks above are structural, and a review showed what that is worth: it
+// changed `activeChatId()` to return null and every one of them still passed.
+// So this drives a real send through the installed wrapper and watches where it
+// goes — awaited, because the first version of this block let the process exit
+// before the promise settled and reported success either way.
+
+async function routesIntoEncryption() {
+    vm.runInContext(
+        'window.__auditCalls = { protectedSends: [], legacySends: 0 };' +
+        'window.PmProtected = {' +
+        '  createProtectedClient: window.PmProtected.createProtectedClient,' +
+        '  browserClient: async function (accountId) {' +
+        '    return {' +
+        '      accountId,' +
+        '      resume: async () => true,' +
+        '      knownProtected: async () => true,' +
+        '      markedProtected: () => true,' +
+        '      sendingBlocked: () => null,' +
+        '      syncGroup: async () => ({ groupId: "group", lastSequence: 0, applied: 0 }),' +
+        '      recallConversation: async () => ({ groupId: "group", protected: true }),' +
+        '      participants: async () => [],' +
+        '      replenishKeyPackages: async () => ({ published: 0 }),' +
+        '      verifyDirectory: async () => ({ verified: 0, head: 0 }),' +
+        '      enforceRevocations: async () => ({ removed: [] }),' +
+        '      receive: async () => [],' +
+        '      send: async (chatId, groupId, text) => {' +
+        '        window.__auditCalls.protectedSends.push({ chatId, groupId, text });' +
+        '        return { messageId: 1 };' +
+        '      },' +
+        '    };' +
+        '  },' +
+        '};' +
+        'window.sendMessage = function legacySender() { window.__auditCalls.legacySends++; };' +
+        'window.loadMessages = function () {};' +
+        'window.showToast = function () {};',
+        context
+    );
+
+    // Reinstall the wrappers over that legacy sender, exactly as install() does.
+    vm.runInContext(read('assets/js/protected-ui.js'), context, { filename: 'protected-ui.js (reinstall)' });
+
+    // Select a conversation and type something, the way the application does.
+    vm.runInContext(
+        'currentChatId = 42; currentUser = { id: 7 };' +
+        'document.getElementById("messageInput").value = "  routed through encryption  ";',
+        context
+    );
+
+    const serialised = await vm.runInContext(
+        '(async function () {' +
+        '  await window.PmProtectedUiFactory.install();' +
+        '  await window.sendMessage();' +
+        '  return JSON.stringify(window.__auditCalls);' +
+        '})()',
+        context
+    );
+
+    const result = JSON.parse(serialised);
+    assert.equal(result.protectedSends.length, 1,
+        'the encrypting client was called exactly once');
+    assert.equal(result.legacySends, 0,
+        'and the legacy plaintext sender was not called at all');
+    assert.equal(result.protectedSends[0].chatId, 42,
+        'with the conversation the application had selected');
+    assert.equal(result.protectedSends[0].text, 'routed through encryption',
+        'and the text from the composer, trimmed');
+    console.log('PASS: a send in a protected conversation is routed into encryption, not to the legacy sender');
+}
+
+routesIntoEncryption()
+    .then(() => {
+        console.log('Production bridge tests passed.');
+        process.exit(0);
+    })
+    .catch((error) => {
+        console.error(error);
+        process.exit(1);
+    });

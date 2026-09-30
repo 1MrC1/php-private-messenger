@@ -76,10 +76,28 @@ protectedAssert(
 
 // A block is lifted by applying what it waits for, never by an empty answer.
 $clientForBlocks = (string)file_get_contents($root . '/assets/js/protected-chat.js');
+// Bound to content, not to the sequence number. The sequence was the server's
+// to choose, and a review relabelled a different valid commit with it to clear
+// the block.
 protectedAssert(
-    str_contains($clientForBlocks, 'const pendingSequence = new Map();') &&
-        str_contains($clientForBlocks, 'appliedSequences.has(waitingFor)'),
-    'an incomplete conversation records what it is waiting for, and only that lifts the block'
+    str_contains($clientForBlocks, 'const pendingPayload = new Map();') &&
+        str_contains($clientForBlocks, 'appliedDigests.has(waitingFor)') &&
+        !str_contains($clientForBlocks, 'appliedSequences'),
+    'a block records the digest of the payload it is waiting for, and only that payload lifts it'
+);
+protectedAssert(
+    str_contains($clientForBlocks, 'const pendingRejoin = new Set();') &&
+        str_contains($clientForBlocks, '!pendingRejoin.has(Number(chatId))'),
+    'and a conversation that can only be repaired by rejoining is never auto-cleared'
+);
+protectedAssert(
+    preg_match('/function markProtected\(chatId\)[\s\S]{0,900}return markedList\(store\)\.includes/', $clientForBlocks) === 1,
+    'marking protection reports whether it actually stuck, rather than swallowing a storage failure'
+);
+protectedAssert(
+    str_contains($clientForBlocks, 'unpublished.has(Number(chatId)) ||') &&
+        preg_match('/async function knownProtected[\s\S]{0,800}pendingRejoin\.has\(Number\(chatId\)\)/', $clientForBlocks) === 1,
+    'and a protection-related block is itself treated as evidence the chat is protected'
 );
 // Positions again, rather than a pattern with quotes inside quotes.
 $markAt = strpos($clientForBlocks, 'markProtected(chatId);');

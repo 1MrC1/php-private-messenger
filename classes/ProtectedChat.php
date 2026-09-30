@@ -124,15 +124,29 @@ final class ProtectedChat
 
             // The unique constraint is part of the claim defence, so readiness has
             // to require it as well: a review dropped it and this still said yes.
+            // The columns and their order, not the name. A review created a
+            // unique index with the right name over the wrong column and this
+            // still said the schema was ready.
+            // Aliased and lower-cased: information_schema hands these back with
+            // uppercase keys on MySQL 8, which made the first version of this
+            // check reject the correct constraint as well as the wrong one.
             $claimUnique = $this->conn->query("
-                SELECT COUNT(*) AS present
+                SELECT LOWER(column_name) AS claim_column, seq_in_index
                 FROM information_schema.statistics
                 WHERE table_schema = DATABASE()
                   AND table_name = 'e2ee_key_packages'
                   AND index_name = 'uniq_e2ee_key_packages_claim_scope'
                   AND non_unique = 0
+                ORDER BY seq_in_index
             ");
-            if ($claimUnique === false || (int)($claimUnique->fetch_assoc()['present'] ?? 0) < 1) {
+            if ($claimUnique === false) {
+                return false;
+            }
+            $claimColumns = [];
+            while (($row = $claimUnique->fetch_assoc()) !== null) {
+                $claimColumns[] = (string)$row['claim_column'];
+            }
+            if ($claimColumns !== ['device_id', 'consumed_by_user_id', 'claimed_for_chat_id']) {
                 return false;
             }
 
