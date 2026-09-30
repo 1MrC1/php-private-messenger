@@ -395,6 +395,44 @@ history.
   so the pattern never compiled and the assertion could not fail. It is fixed,
   and it now proves it matches before it is trusted.
 
+## The third review, the next day
+
+A third review checked the second round's work and found six more, including one
+that matters more than any individual bug: **a defence that was never installed.**
+The interface called a client method that did not exist, the exception was
+swallowed, and the test double implemented the missing method — so the suite was
+green while the protection was absent. The fix for that one is not the method; it
+is `tests/protected_chat_test.php` now comparing every call the interface makes
+against the client's exports, and failing if the double implements anything the
+real client lacks.
+
+The rest, each reproduced before being fixed:
+
+- **The encrypt-or-not decision was asynchronous**, so the plaintext path could
+  win the race to it. It is synchronous now and consults a local marker before the
+  server's flag.
+- **A stale welcome could be interleaved** between a published commit and its
+  welcome, letting a newly joined device send to a membership that had already
+  changed. Commit and welcome are published as one transaction with consecutive
+  sequence numbers, and handshakes for a group this device has not joined are held
+  and replayed rather than skipped.
+- **Attachments skipped the pre-send guard** text had. There is one guard now.
+- **Recovery was a way around a send block**: the file carried keys but not the
+  blocks. It carries the blocks, the pinned directory head and the key bindings.
+- **The key-package cap was larger than the supply** — ten packages, a cap of
+  twelve — so exhaustion won anyway. The cap is three, repeat claims for the same
+  conversation are answered from the package already spent, and replenishment has
+  a caller.
+- **The database invariant was one-sided**: plaintext first and protection second
+  was still possible. Both directions are refused now, and the migration's
+  verification aborts rather than printing violations.
+
+What three rounds have established about this codebase, which is worth more than
+any of the individual fixes: the defects are in the seams — a method that is not
+there, a check on one path and not its twin, an await in a decision that cannot
+wait, a cap above the supply it bounds, an invariant enforced in one direction.
+None of them were cryptography.
+
 **Still open.**
 
 - The independent cryptographic review (#7), which is external by definition.

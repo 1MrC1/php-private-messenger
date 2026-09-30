@@ -81,9 +81,19 @@ re-deriving it, and which claims are worth attacking.
   DOM flag; and one of my own tests passed vacuously because its regular
   expression did not compile.
 
-  What that second round should tell a reviewer: the interesting bugs here are in
-  the *gaps between* fixes — ordering, atomicity, pagination, durability — rather
-  than in the cryptography, which is OpenMLS's.
+  Round three, against round two's work: a downgrade defence that was never
+  installed at all (the interface called a method the client did not have, the
+  error was swallowed, and the test double implemented it); an asynchronous
+  encrypt-or-not decision the plaintext path could beat; a stale welcome
+  interleaved between a commit and its publication; attachments skipping the
+  pre-send guard text had; recovery clearing a send block; a key-package cap
+  larger than the supply it bounded; and a one-sided database invariant.
+
+  What three rounds should tell a reviewer: the interesting bugs here are in the
+  *seams* — a method that is not there, a check on one path and not its twin, an
+  await in a decision that cannot wait, a cap above the supply, an invariant
+  enforced in one direction — and not in the cryptography, which is OpenMLS's.
+  Start by asking what each defence depends on, and whether that thing exists.
 
 ## Claims we would most like attacked
 
