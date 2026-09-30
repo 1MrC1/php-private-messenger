@@ -516,9 +516,10 @@ defended in the previous round as the real fix.
   not happen if that write fails, and any protection-related block counts as
   evidence the conversation is protected.
 - **A relabelled commit could clear a removal block.** The block bound to the
-  sequence number, which the server chooses. Blocks bind to the payload digest
-  now; a genuinely corrupt commit never lifts one, and the conversation is
-  recorded as needing a rejoin.
+  sequence number, which the server chooses. It was then bound to the payload
+  digest — and round seven cleared *that* by supplying the missing prerequisite so
+  the same bytes applied, which says nothing about the change actually missed. No
+  rule based on something applying is sound. See round seven.
 - **Readiness checked an index name, not a constraint.** It compares columns and
   order now.
 
@@ -534,6 +535,33 @@ believed closed a class, and twice the test itself was the thing that needed
 fixing. If you are reading this to decide whether the feature is safe, the answer
 this document can honestly give is: it has been attacked six times, it changed
 every time, and nobody independent has looked yet.
+
+## The seventh review
+
+Two findings. The first retired an idea I had got wrong three times in a row.
+
+- **A payload digest was not a checkpoint.** A commit that fails only because its
+  prerequisite is missing applies perfectly once that prerequisite arrives, so
+  "the same bytes applied" is not "I am no longer missing a change". All three
+  rules I had tried — a flag, a sequence number, a payload digest — were clearable
+  by something the server controls.
+
+  Nothing that applies can lift a block now. A processing failure means the device
+  has lost track: it publishes fresh key packages and waits to be re-admitted, and
+  the block lifts only when it joins a welcome admitting a key package it created
+  *after* the failure. Only a current member can build a welcome, and the welcome
+  names the key package it admits, so the checkpoint belongs to the protocol
+  rather than to the delivery service. A conversation awaiting repair looks only
+  for that welcome, so it is not stuck forever.
+- **The bridge test still was not testing production order.** It hard-coded its
+  own script list and reloaded the interface by hand, so swapping the two
+  protected tags in `index.html` left it passing. It reads the order out of the
+  markup now and requires the interface to install itself.
+
+**Seven rounds, forty-four findings, none in the cryptography.** Four of them have
+now been tests or checkpoints of mine that could not fail. The count of things
+that were actually broken in the product is the smaller number; the count of
+times I believed I had finished is seven.
 
 **Still open.**
 

@@ -126,9 +126,19 @@ re-deriving it, and which claims are worth attacking.
   describe it? Second: what does the defence key on, and who controls that value?
   Six rounds say almost everything found lives in one of those two answers.
 
+  Round seven retired the third unsound rule for lifting a handshake block: a
+  flag was cleared by an empty page, a sequence number by relabelling a different
+  commit, and a payload digest by supplying the missing prerequisite so the same
+  bytes applied. Recovery is now rejoin-only, pinned to a welcome admitting a key
+  package created after the failure — a checkpoint only a group member can
+  produce. It also found the bridge test still hard-coding its own script order
+  instead of reading `index.html`.
+
   A specific invitation: **mutate the code and see whether the suite notices.**
-  Three of the findings so far were tests that could not fail. Treat the suite as
-  a record of what has been attacked, never as evidence that a guarantee holds.
+  Four of the findings so far were tests or checkpoints of mine that could not
+  fail. A useful pass is: pick each security state that can be *cleared*, and ask
+  who controls the value that clears it. Treat the suite as a record of what has
+  been attacked, never as evidence that a guarantee holds.
 
 ## Claims we would most like attacked
 
