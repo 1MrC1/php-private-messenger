@@ -518,6 +518,117 @@ function fakeServer() {
         console.log('PASS: messages past the first page are fetched and decrypted');
     }
 
+    // ---- a deferred change that will not apply is not forgiven -------------
+    // The catch around the welcome used to wrap the replay as well, so a
+    // deferred commit that failed during replay was swallowed as "this welcome
+    // belongs to another device" — and the incomplete block was then cleared, so
+    // the newly joined device carried on sending from the epoch before the
+    // removal it never applied.
+
+    {
+        const lateChat = 95;
+        const lateStore = memoryStorage();
+        const late = build(51, lateStore);
+        await late.enroll({
+            identity: 'late@example', currentPassword: 'secret',
+            secondFactorCode: '515151', keyPackageCount: 4,
+        });
+        await server.post('api/chat.php', { action: 'protect_chat', chat_id: lateChat, __userId: 51 });
+
+        // A queue with contiguous sequences: a commit this device cannot apply,
+        // then a welcome that does let it join. The commit is deferred, the join
+        // succeeds, and the replay of the commit then fails.
+        const unusable = Buffer.from('a commit this device cannot read').toString('base64');
+        const foreignWelcome = Buffer.concat([
+            Buffer.from([0, 0, 0, 4]), Buffer.from('nope'), Buffer.from('tree'),
+        ]).toString('base64');
+        server.handshakes.set(lateChat, [
+            { sequence: 1, kind: 2, epoch: 1, payload: unusable },
+            { sequence: 2, kind: 3, epoch: 1, payload: foreignWelcome },
+        ]);
+
+        await assert.rejects(() => late.syncGroup(lateChat, 0),
+            /could not be read|could not account for/,
+            'a group change this device cannot apply is refused rather than stepped over');
+        assert.ok(late.sendingBlocked(lateChat, null),
+            'and the conversation stays blocked from sending');
+
+        // Repeating the sync must not clear the block either.
+        await assert.rejects(() => late.syncGroup(lateChat, 0), /could not be read|could not account for/);
+        assert.ok(late.sendingBlocked(lateChat, null), 'a second attempt does not forgive it');
+        console.log('PASS: a deferred change that cannot be applied keeps the conversation blocked');
+    }
+
+    // ---- the creator remembers its own conversation ------------------------
+    // A fourth review found the one account that never wrote the protection
+    // marker was the conversation's creator: it held the group in memory, and
+    // after a reload the server's flag was the only thing left saying the
+    // conversation was protected.
+
+    {
+        const marker = (() => {
+            const values = new Map();
+            return {
+                getItem: (key) => (values.has(key) ? values.get(key) : null),
+                setItem: (key, value) => { values.set(key, String(value)); },
+                removeItem: (key) => { values.delete(key); },
+                dump: () => Object.fromEntries(values),
+            };
+        })();
+
+        const creatorStore = memoryStorage();
+        const creator = createProtectedClient({
+            accountId: 41,
+            storage: creatorStore,
+            localStore: marker,
+            crypto: webcrypto,
+            randomBytes: (length) => webcrypto.getRandomValues(new Uint8Array(length)),
+            post: (url, body) => server.post(url, Object.assign({ __userId: 41 }, body)),
+            mls,
+        });
+        await creator.enroll({
+            identity: 'creator@example', currentPassword: 'secret',
+            secondFactorCode: '414141', keyPackageCount: 4,
+        });
+
+        const created = await creator.startConversation(90, 41);
+        assert.ok(created.groupId, 'the creator protects a conversation');
+
+        // The state the reload leaves behind: a fresh client over the same stores.
+        const afterReload = createProtectedClient({
+            accountId: 41,
+            storage: creatorStore,
+            localStore: marker,
+            crypto: webcrypto,
+            randomBytes: (length) => webcrypto.getRandomValues(new Uint8Array(length)),
+            post: (url, body) => server.post(url, Object.assign({ __userId: 41 }, body)),
+            mls,
+        });
+        assert.equal(await afterReload.resume(), true, 'the creator resumes');
+        assert.equal(await afterReload.knownProtected(90), true,
+            'and still knows the conversation it created is protected');
+        assert.equal(afterReload.markedProtected(90), true,
+            'including from the synchronous marker, which is what a send path can read');
+        console.log('PASS: the creator remembers its own protected conversation across a reload');
+
+        // Even with the marker wiped — a cleared browser — the sealed record
+        // re-marks it on resume, so the server's flag is still not the only word.
+        marker.removeItem('pm-protected-chats:41');
+        const wiped = createProtectedClient({
+            accountId: 41,
+            storage: creatorStore,
+            localStore: marker,
+            crypto: webcrypto,
+            randomBytes: (length) => webcrypto.getRandomValues(new Uint8Array(length)),
+            post: (url, body) => server.post(url, Object.assign({ __userId: 41 }, body)),
+            mls,
+        });
+        assert.equal(await wiped.resume(), true, 'it resumes with the marker gone');
+        assert.equal(wiped.markedProtected(90), true,
+            'and the marker is re-derived from the sealed record');
+        console.log('PASS: a cleared marker is rebuilt from the sealed record on resume');
+    }
+
     // ---- recovery is not a way around a security state ----------------------
     // A review exported a recovery file from a device blocked from sending on an
     // unpublished branch, restored it elsewhere, and found the block gone.

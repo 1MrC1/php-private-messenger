@@ -36,6 +36,28 @@ PREPARE pm_claim_scope_statement FROM @pm_claim_scope_ddl;
 EXECUTE pm_claim_scope_statement;
 DEALLOCATE PREPARE pm_claim_scope_statement;
 
+-- One claim per conversation per device, enforced rather than checked. The
+-- application locks the device rows before deciding, but a constraint is what
+-- makes that true regardless of which code path asks next.
+SET @pm_claim_unique_exists = (
+    SELECT COUNT(*) FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'e2ee_key_packages'
+      AND index_name = 'uniq_e2ee_key_packages_claim_scope'
+);
+
+SET @pm_claim_unique_ddl = IF(
+    @pm_claim_unique_exists = 0,
+    'ALTER TABLE e2ee_key_packages
+        ADD UNIQUE KEY uniq_e2ee_key_packages_claim_scope
+            (device_id, consumed_by_user_id, claimed_for_chat_id)',
+    'SELECT ''claim scope is already unique'' AS migration_status'
+);
+
+PREPARE pm_claim_unique_statement FROM @pm_claim_unique_ddl;
+EXECUTE pm_claim_unique_statement;
+DEALLOCATE PREPARE pm_claim_unique_statement;
+
 DROP TRIGGER IF EXISTS pm_chat_protection_insert;
 
 DELIMITER $$
@@ -63,6 +85,14 @@ DELIMITER ;
 -- The previous migration only printed violations, which a review rightly called
 -- out: a verification query that cannot fail verifies nothing. These signal.
 -- ---------------------------------------------------------------------------
+
+-- Expect 1: the claim scope is unique.
+SELECT COUNT(*) AS claim_scope_unique
+FROM information_schema.statistics
+WHERE table_schema = DATABASE()
+  AND table_name = 'e2ee_key_packages'
+  AND index_name = 'uniq_e2ee_key_packages_claim_scope'
+  AND non_unique = 0;
 
 -- Expect 3: both message triggers plus the new one on chat_protection.
 SELECT COUNT(*) AS protection_triggers

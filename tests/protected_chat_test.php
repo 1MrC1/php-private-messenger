@@ -34,6 +34,95 @@ protectedAssert(
     'the plaintext fingerprint still distinguishes content'
 );
 
+// ---- the routing decision, and what it depends on ---------------------------
+// Four rounds of review have found the same shape of defect: a defence that
+// depends on something which is not there, or which arrives too late. These pin
+// the dependencies rather than the behaviour.
+
+$clientForRouting = (string)file_get_contents($root . '/assets/js/protected-chat.js');
+$uiForRouting = (string)file_get_contents($root . '/assets/js/protected-ui.js');
+
+protectedAssert(
+    preg_match(
+        '/protect_chat.*?rememberConversation\(chatId, toBase64\(groupId\), \{\}\).*?await admit\(/s',
+        $clientForRouting
+    ) === 1,
+    'the creator records the conversation between protecting it and admitting anyone'
+);
+protectedAssert(
+    str_contains($clientForRouting, 'async function remarkProtectedConversations()') &&
+        preg_match('/loadBlocks\(\);\s*\n(?:\s*\/\/[^\n]*\n)*\s*await remarkProtectedConversations\(\);/', $clientForRouting) === 1,
+    'and a resumed session re-derives the markers from the sealed record'
+);
+protectedAssert(
+    str_contains($uiForRouting, 'async function protectedForSend(chatId)') &&
+        preg_match('/await ui\.protectedForSend\(chatId\)/', $uiForRouting) === 1 &&
+        substr_count($uiForRouting, 'ui.protectedForSend(chatId)') === 2,
+    'both send paths resolve protection before any sender is chosen'
+);
+protectedAssert(
+    preg_match('/if \(!chatId\) \{\s*\n\s*return legacySend\.apply/', $uiForRouting) === 1,
+    'and the legacy sender is only reachable after that resolution'
+);
+
+// The welcome catch must cover the join and nothing else.
+protectedAssert(
+    preg_match(
+        '/joinedGroupId = session\.join_group\([^;]*;\s*\n\s*joinedHere = true;\s*\n\s*\} catch/s',
+        $clientForRouting
+    ) === 1,
+    'the welcome catch covers joining only'
+);
+protectedAssert(
+    preg_match('/if \(joinedHere\) \{\s*\n(?:\s*\/\/[^\n]*\n)*\s*applied \+= await replayDeferred\(\);/', $clientForRouting) === 1,
+    'so a failed replay of a deferred change propagates instead of being swallowed'
+);
+protectedAssert(
+    str_contains($clientForRouting, 'const unaccounted = joinedGroupId !== null && deferred.length > 0;'),
+    'and the block is not cleared while a change is still unaccounted for'
+);
+
+// The claim has to decide inside the transaction it acts in. Positions rather
+// than one long pattern: an assertion that spans a whole method is the kind that
+// quietly stops matching.
+$directoryForClaims = (string)file_get_contents($root . '/classes/DeviceDirectory.php');
+$claimStart = (int)strpos($directoryForClaims, 'public function claimKeyPackages(');
+$claimBody = substr($directoryForClaims, $claimStart, 8000);
+$claimOrder = [
+    'transaction' => strpos($claimBody, 'begin_transaction()'),
+    'device lock' => strpos($claimBody, 'FOR UPDATE'),
+    'reuse lookup' => strpos($claimBody, 'k.claimed_for_chat_id ='),
+    'quota' => strpos($claimBody, 'MAX_CLAIMS_PER_HOUR'),
+    'allocation' => strpos($claimBody, 'SET consumed_at = NOW()'),
+    'commit' => strpos($claimBody, 'commit()'),
+];
+protectedAssert(
+    !in_array(false, $claimOrder, true),
+    'the claim contains every step this checks the order of'
+);
+$claimPositions = array_values($claimOrder);
+$sortedPositions = $claimPositions;
+sort($sortedPositions);
+protectedAssert(
+    $claimPositions === $sortedPositions,
+    'a claim locks the devices, then decides reuse and quota, then allocates, then commits'
+);
+protectedAssert(
+    str_contains(
+        (string)file_get_contents($root . '/migrations/20260930_scope_key_package_claims.sql'),
+        'uniq_e2ee_key_packages_claim_scope'
+    ),
+    'and the database makes one claim per conversation and device unique'
+);
+
+// Readiness must cover everything a claim and the backstop need.
+$protectedForReadiness = (string)file_get_contents($root . '/classes/ProtectedChat.php');
+protectedAssert(
+    str_contains($protectedForReadiness, "column_name = 'claimed_for_chat_id'") &&
+        str_contains($protectedForReadiness, "'pm_chat_protection_insert'"),
+    'readiness checks the claim column and the protection triggers, not only the tables'
+);
+
 // ---- the interface and the client must agree on their contract --------------
 // A third review found `protected-ui.js` calling `client.knownProtected()`, which
 // the client did not have: the TypeError was swallowed by a catch, the protection

@@ -106,6 +106,36 @@ final class ProtectedChat
                 return false;
             }
 
+            // The column a claim writes, and the triggers that hold the
+            // plaintext invariant. A review created a schema with the eight
+            // tables and neither of those, and this said the feature was ready:
+            // claims would then fail at runtime and the database backstop would
+            // simply be absent.
+            $claimScope = $this->conn->query("
+                SELECT COUNT(*) AS present
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'e2ee_key_packages'
+                  AND column_name = 'claimed_for_chat_id'
+            ");
+            if ($claimScope === false || (int)($claimScope->fetch_assoc()['present'] ?? 0) !== 1) {
+                return false;
+            }
+
+            $triggers = $this->conn->query("
+                SELECT COUNT(*) AS present
+                FROM information_schema.triggers
+                WHERE trigger_schema = DATABASE()
+                  AND trigger_name IN (
+                        'pm_messages_protected_insert',
+                        'pm_messages_protected_update',
+                        'pm_chat_protection_insert'
+                      )
+            ");
+            if ($triggers === false || (int)($triggers->fetch_assoc()['present'] ?? 0) !== 3) {
+                return false;
+            }
+
             // The ciphertext column must be binary. If it ever became a text
             // type a character set would start rewriting ciphertext, which
             // would corrupt messages silently rather than loudly.

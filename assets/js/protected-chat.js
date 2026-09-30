@@ -242,6 +242,11 @@
             if (session !== null) {
                 // Restore the reasons not to send before anything can send.
                 await loadBlocks();
+                // And re-mark every conversation the sealed record already knows
+                // is protected. A device enrolled before the marker existed, or
+                // one whose local storage was cleared, would otherwise have to
+                // take the server's word for it.
+                await remarkProtectedConversations();
             }
             return session !== null;
         }
@@ -331,6 +336,16 @@
             if (!protect || protect.success !== true) {
                 throw new Error((protect && protect.message) || 'Could not protect the conversation');
             }
+
+            // Record it *here*, before admitting anyone. A fourth review found
+            // the creator was the one account that never wrote this: it held the
+            // group in memory, and after a reload the server's flag was the only
+            // thing left saying the conversation was protected — so answering
+            // `protected: false` sent the creator's next message in the clear.
+            // Protection exists from this line onwards, so this is the line that
+            // has to remember it.
+            await rememberConversation(chatId, toBase64(groupId), {});
+            await saveSession();
 
             await admit(chatId, groupId, claim.key_packages);
             await saveSession();
@@ -512,15 +527,28 @@
                     const payload = fromBase64(entry.payload);
                     if (entry.kind === 3) {
                         // A welcome, carrying the ratchet tree the joiner needs.
+                        //
+                        // The catch covers the join and nothing else. It used to
+                        // wrap the replay too, and a fourth review used that: a
+                        // corrupted removal deferred before the welcome failed
+                        // during replay, the failure was swallowed as "this
+                        // welcome is for another device", the incomplete block was
+                        // then cleared, and the newly joined device sent from the
+                        // pre-removal epoch — which the removed device could read.
+                        let joinedHere = false;
                         try {
                             const split = readLengthPrefixed(payload);
                             joinedGroupId = session.join_group(split.head, split.tail);
-                            // Anything we set aside before joining may belong to
-                            // this group after all.
-                            applied += await replayDeferred();
+                            joinedHere = true;
                         } catch (error) {
                             // A welcome addressed to another device is not an error
                             // for this one; it simply cannot open it.
+                        }
+                        if (joinedHere) {
+                            // Outside the catch: a replay that fails is a group
+                            // change this device cannot account for, and it must
+                            // stop sending rather than continue.
+                            applied += await replayDeferred();
                         }
                         continue;
                     }
@@ -562,6 +590,19 @@
                 incomplete.add(Number(chatId));
                 await saveBlocks();
                 throw new Error('This conversation has more group history than could be fetched at once');
+            }
+            // Only clear the block if this walk actually accounted for everything.
+            // `replayDeferred()` throws when it cannot, so reaching here means it
+            // did — but a handshake still held for a group we joined during this
+            // walk would be unaccounted for, so check before clearing.
+            const unaccounted = joinedGroupId !== null && deferred.length > 0;
+            if (unaccounted) {
+                incomplete.add(Number(chatId));
+                await saveBlocks();
+                throw new Error(
+                    'This conversation has group changes this device could not account for, so it must ' +
+                    'be rejoined before anything else is sent'
+                );
             }
             if (incomplete.delete(Number(chatId))) {
                 await saveBlocks();
@@ -864,6 +905,20 @@
                 markProtected(chatId);
             }
             return known;
+        }
+
+        /** Re-derive the synchronous markers from the sealed record. */
+        async function remarkProtectedConversations() {
+            try {
+                const known = await readSealed(conversationsId, {});
+                for (const [chatId, record] of Object.entries(known)) {
+                    if (record && (record.protected === true || record.groupId)) {
+                        markProtected(Number(chatId));
+                    }
+                }
+            } catch (error) {
+                // Nothing to re-mark, or storage unavailable.
+            }
         }
 
         function localStore() {
@@ -1313,7 +1368,7 @@
          * The passphrase is generated for the person rather than chosen by
          * them, because the key derivation available in a browser without
          * WebAssembly is PBKDF2, which is materially weaker against a GPU than
-         * Argon2id. A ~128-bit generated passphrase does not depend on the
+         * Argon2id. A 118.9-bit generated passphrase does not depend on the
          * derivation being strong.
          *
          * Download-only by design: the server never receives this. Handing it

@@ -297,8 +297,7 @@ final class DeviceDirectory
     ): array {
         // Both sides must be in the conversation the claim is for. Without this
         // any authenticated account could spend another account's one-time key
-        // packages until it had none left and could no longer be added to a
-        // protected conversation at all.
+        // packages until it had none left.
         if (!$chats->isParticipant($chatId, $claimingUserId) ||
             !$chats->isParticipant($chatId, $targetUserId)) {
             throw new ProtectedChatMismatch(
@@ -307,82 +306,94 @@ final class DeviceDirectory
             );
         }
 
-        // Participation alone did not fix the exhaustion a second review found:
-        // anyone who can start a private conversation satisfies it, and can then
-        // claim in a loop. Claims are bounded per claimant, per target, per hour,
-        // and a conversation only needs one round of them.
-        // A conversation only needs one package per device: a second claim for the
-        // same conversation and device is a retry, not a new admission, so it must
-        // not spend another package. This is what makes the cap workable rather
-        // than merely small.
-        $alreadyClaimed = $this->select(
-            'SELECT k.device_id, k.key_package
-               FROM e2ee_key_packages k
-               JOIN e2ee_devices d ON d.id = k.device_id
-              WHERE d.user_id = ?
-                AND k.consumed_by_user_id = ?
-                AND k.claimed_for_chat_id = ?',
-            'iii',
-            [$targetUserId, $claimingUserId, $chatId]
-        );
-        $reusable = [];
-        foreach ($alreadyClaimed as $row) {
-            $reusable[(int)$row['device_id']] = (string)$row['key_package'];
-        }
-
-        $recent = $this->select(
-            'SELECT COUNT(*) AS spent
-               FROM e2ee_key_packages k
-               JOIN e2ee_devices d ON d.id = k.device_id
-              WHERE d.user_id = ?
-                AND k.consumed_by_user_id = ?
-                AND k.consumed_at >= (NOW() - INTERVAL 1 HOUR)',
-            'ii',
-            [$targetUserId, $claimingUserId]
-        );
-        // Repeats for this conversation do not count: they spend nothing.
-        $spentElsewhere = (int)($recent[0]['spent'] ?? 0) - count($reusable);
-        if ($spentElsewhere >= self::MAX_CLAIMS_PER_HOUR) {
-            throw new ProtectedChatMismatch(
-                'Too many key packages have been claimed for that account recently',
-                'key_package_claim_limited'
+        // ONE transaction for the whole claim.
+        //
+        // The previous version checked reuse and the hourly cap first and opened
+        // a transaction per device afterwards. A fourth review aligned ten
+        // concurrent claims for the same conversation and device: every one of
+        // them passed the checks before any of them reached the lock, then each
+        // serialised and spent the next package. Checks outside the transaction
+        // that acts on them are not checks.
+        //
+        // The devices of the target account are locked first, so concurrent
+        // claims for the same account serialise here rather than at the package
+        // row, and the reuse and quota questions are then answered inside that
+        // same transaction.
+        $this->conn->begin_transaction();
+        try {
+            $devices = $this->select(
+                'SELECT id, public_id, signature_public_key
+                   FROM e2ee_devices
+                  WHERE user_id = ? AND revoked_at IS NULL
+                  ORDER BY id
+                    FOR UPDATE',
+                'i',
+                [$targetUserId]
             );
-        }
-
-        $devices = $this->select(
-            'SELECT id, public_id, signature_public_key
-               FROM e2ee_devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY id',
-            'i',
-            [$targetUserId]
-        );
-        // Devices already claimed for this conversation are answered from that
-        // claim, so a repeated attempt costs nothing.
-        $claimedAgain = 0;
-        if ($devices === []) {
-            throw new ProtectedChatMismatch('That account has no enrolled device', 'no_enrolled_device');
-        }
-
-        $claimed = [];
-        foreach ($devices as $device) {
-            $deviceId = (int)$device['id'];
-
-            // Already claimed for this conversation: hand back the same package
-            // rather than spending another. A retried admission is not a new one.
-            if (isset($reusable[$deviceId])) {
-                $claimedAgain++;
-                $claimed[] = [
-                    'device_id' => $deviceId,
-                    'public_id' => base64_encode((string)$device['public_id']),
-                    'signature_public_key' => base64_encode((string)$device['signature_public_key']),
-                    'key_package' => base64_encode($reusable[$deviceId]),
-                    'exhausted' => false,
-                    'reused' => true,
-                ];
-                continue;
+            if ($devices === []) {
+                throw new ProtectedChatMismatch('That account has no enrolled device', 'no_enrolled_device');
             }
 
-            $this->conn->begin_transaction();
-            try {
+            // A second claim for the same conversation and device is a retry, not
+            // a new admission, so it is answered from the package already spent.
+            $alreadyClaimed = $this->select(
+                'SELECT k.device_id, k.key_package
+                   FROM e2ee_key_packages k
+                   JOIN e2ee_devices d ON d.id = k.device_id
+                  WHERE d.user_id = ?
+                    AND k.consumed_by_user_id = ?
+                    AND k.claimed_for_chat_id = ?',
+                'iii',
+                [$targetUserId, $claimingUserId, $chatId]
+            );
+            $reusable = [];
+            foreach ($alreadyClaimed as $row) {
+                $reusable[(int)$row['device_id']] = (string)$row['key_package'];
+            }
+
+            $recent = $this->select(
+                'SELECT COUNT(*) AS spent
+                   FROM e2ee_key_packages k
+                   JOIN e2ee_devices d ON d.id = k.device_id
+                  WHERE d.user_id = ?
+                    AND k.consumed_by_user_id = ?
+                    AND k.consumed_at >= (NOW() - INTERVAL 1 HOUR)',
+                'ii',
+                [$targetUserId, $claimingUserId]
+            );
+            // Repeats for this conversation spend nothing, so they do not count.
+            $spentElsewhere = (int)($recent[0]['spent'] ?? 0) - count($reusable);
+            if ($spentElsewhere >= self::MAX_CLAIMS_PER_HOUR) {
+                throw new ProtectedChatMismatch(
+                    'Too many key packages have been claimed for that account recently',
+                    'key_package_claim_limited'
+                );
+            }
+
+            $budget = self::MAX_CLAIMS_PER_HOUR - $spentElsewhere;
+            $claimed = [];
+            foreach ($devices as $device) {
+                $deviceId = (int)$device['id'];
+
+                if (isset($reusable[$deviceId])) {
+                    $claimed[] = [
+                        'device_id' => $deviceId,
+                        'public_id' => base64_encode((string)$device['public_id']),
+                        'signature_public_key' => base64_encode((string)$device['signature_public_key']),
+                        'key_package' => base64_encode($reusable[$deviceId]),
+                        'exhausted' => false,
+                        'reused' => true,
+                    ];
+                    continue;
+                }
+
+                if ($budget < 1) {
+                    throw new ProtectedChatMismatch(
+                        'Too many key packages have been claimed for that account recently',
+                        'key_package_claim_limited'
+                    );
+                }
+
                 $candidate = $this->select(
                     'SELECT id, key_package FROM e2ee_key_packages
                       WHERE device_id = ? AND consumed_at IS NULL
@@ -391,11 +402,9 @@ final class DeviceDirectory
                     [$deviceId]
                 );
                 if ($candidate === []) {
-                    $this->conn->rollback();
                     // A device with no packages left cannot be added right now.
                     // Saying so is better than silently forming a group without
-                    // one of the recipient's devices, which would look like
-                    // delivery working while one device can never decrypt.
+                    // one of the recipient's devices.
                     $claimed[] = ['device_id' => $deviceId, 'key_package' => null, 'exhausted' => true];
                     continue;
                 }
@@ -409,31 +418,28 @@ final class DeviceDirectory
                     [$claimingUserId, $chatId, $packageId]
                 );
                 if ($consumed !== 1) {
-                    $this->conn->rollback();
                     throw new ProtectedChatMismatch('Key package was already taken', 'key_package_race');
                 }
-                $this->conn->commit();
+                $budget--;
 
                 $claimed[] = [
                     'device_id' => $deviceId,
                     'public_id' => base64_encode((string)$device['public_id']),
                     // The key this device claims to sign with. The admitting
                     // client compares it against the key inside the key package
-                    // and refuses a mismatch: a review showed the two were only
-                    // ever checked independently, which produced devices that
-                    // joined under one key and could not be revoked by the
-                    // other.
+                    // and refuses a mismatch.
                     'signature_public_key' => base64_encode((string)$device['signature_public_key']),
                     'key_package' => base64_encode((string)$candidate[0]['key_package']),
                     'exhausted' => false,
                 ];
-            } catch (Throwable $error) {
-                $this->conn->rollback();
-                throw $error;
             }
-        }
 
-        return $claimed;
+            $this->conn->commit();
+            return $claimed;
+        } catch (Throwable $error) {
+            $this->conn->rollback();
+            throw $error;
+        }
     }
 
     // ---- the directory chain ----------------------------------------------

@@ -198,6 +198,41 @@
         }
 
         /**
+         * The routing decision, awaited before any sender is chosen.
+         *
+         * `isProtected()` stays synchronous for drawing badges, and it answers
+         * correctly whenever this page or local storage already knows. What it
+         * cannot do is cover a device whose marker is missing — a conversation
+         * protected before markers existed, or storage cleared — and a fourth
+         * review used exactly that gap on the conversation's own creator.
+         *
+         * So the send paths await this instead. Awaiting is safe here in a way it
+         * was not before, because nothing is sent until it resolves: the legacy
+         * plaintext sender is not called first and corrected afterwards.
+         *
+         * The residual case, stated rather than hidden: a device whose marker is
+         * gone *and* whose encryption client cannot load at all falls back to the
+         * server's flag. The alternative is refusing to send in every ordinary
+         * unprotected conversation whenever the WebAssembly fails to load, which
+         * would break the plaintext messenger this is bolted onto.
+         */
+        async function protectedForSend(chatId) {
+            if (isProtected(chatId)) {
+                return true;
+            }
+            try {
+                const client = await ensureClient();
+                if (await client.knownProtected(chatId)) {
+                    pinnedProtected.add(Number(chatId));
+                    return true;
+                }
+            } catch (error) {
+                // Cannot ask; the synchronous answer above is all there is.
+            }
+            return false;
+        }
+
+        /**
          * Every reason not to send, in one place.
          *
          * It used to be inline in the text path only, which is how attachments
@@ -526,6 +561,7 @@
             showSafetyNumber,
             decorateMessages,
             refreshProtectionPins,
+            protectedForSend,
             conversations,
         };
     }
@@ -628,10 +664,18 @@
         // client. Everything else keeps the path it already had.
         const legacySend = window.sendMessage;
         if (typeof legacySend === 'function') {
-            window.sendMessage = function protectedAwareSend() {
+            window.sendMessage = async function protectedAwareSend() {
                 const chatId = window.currentChatId;
-                if (!chatId || !ui.isProtected(chatId)) {
+                if (!chatId) {
                     return legacySend.apply(this, arguments);
+                }
+                // Resolve first, route second. Nothing has been sent yet at this
+                // point, which is what makes awaiting safe.
+                const args = arguments;
+                const self = this;
+                const protectedChat = await ui.protectedForSend(chatId);
+                if (!protectedChat) {
+                    return legacySend.apply(self, args);
                 }
                 const input = document.getElementById('messageInput');
                 const text = input ? input.value.trim() : '';
@@ -722,10 +766,15 @@
         // error and no way to send a file at all.
         const legacyFileSelect = window.handleFileSelect;
         if (typeof legacyFileSelect === 'function') {
-            window.handleFileSelect = function protectedAwareFileSelect(event) {
+            window.handleFileSelect = async function protectedAwareFileSelect(event) {
                 const chatId = window.currentChatId;
-                if (!chatId || !ui.isProtected(chatId)) {
+                if (!chatId) {
                     return legacyFileSelect.apply(this, arguments);
+                }
+                const args = arguments;
+                const self = this;
+                if (!(await ui.protectedForSend(chatId))) {
+                    return legacyFileSelect.apply(self, args);
                 }
                 const input = event && event.target;
                 const file = input && input.files && input.files[0];
