@@ -896,6 +896,7 @@
     "protected.not_enrolled": "Este dispositivo aún no está configurado para conversaciones protegidas",
     "protected.admit_failed": "No se pudo añadir a esta conversación un dispositivo de la otra cuenta.",
     "protected.attachment": "Archivo cifrado",
-    "api.key_packages_required": "Se requieren paquetes de claves"
+    "api.key_packages_required": "Se requieren paquetes de claves",
+    "api.handshake_messages_required": "Se requieren mensajes de negociación"
   }
 }

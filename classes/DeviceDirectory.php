@@ -37,10 +37,18 @@ final class DeviceDirectory
     public const LOW_WATERMARK = 5;
     /**
      * How many of one account's one-time key packages a single other account may
-     * consume in an hour. A conversation needs one per device of the other
-     * account, so this is generous for honest use and useless for exhaustion.
+     * consume in an hour.
+     *
+     * A third review pointed out the obvious flaw in the first attempt at this: a
+     * device publishes ten packages and the cap was twelve, so the account was
+     * exhausted before the limit could fire. The cap has to be well under the
+     * initial supply, and a conversation needs one package per device of the other
+     * account, so three is generous for honest use — a person with three devices
+     * starting a conversation — and useless for exhaustion.
      */
-    public const MAX_CLAIMS_PER_HOUR = 12;
+    public const MAX_CLAIMS_PER_HOUR = 3;
+    /** What a device publishes at enrolment, for the comparison above. */
+    public const INITIAL_KEY_PACKAGES = 10;
 
     private Database $db;
     private mysqli $conn;
@@ -303,6 +311,25 @@ final class DeviceDirectory
         // anyone who can start a private conversation satisfies it, and can then
         // claim in a loop. Claims are bounded per claimant, per target, per hour,
         // and a conversation only needs one round of them.
+        // A conversation only needs one package per device: a second claim for the
+        // same conversation and device is a retry, not a new admission, so it must
+        // not spend another package. This is what makes the cap workable rather
+        // than merely small.
+        $alreadyClaimed = $this->select(
+            'SELECT k.device_id, k.key_package
+               FROM e2ee_key_packages k
+               JOIN e2ee_devices d ON d.id = k.device_id
+              WHERE d.user_id = ?
+                AND k.consumed_by_user_id = ?
+                AND k.claimed_for_chat_id = ?',
+            'iii',
+            [$targetUserId, $claimingUserId, $chatId]
+        );
+        $reusable = [];
+        foreach ($alreadyClaimed as $row) {
+            $reusable[(int)$row['device_id']] = (string)$row['key_package'];
+        }
+
         $recent = $this->select(
             'SELECT COUNT(*) AS spent
                FROM e2ee_key_packages k
@@ -313,7 +340,9 @@ final class DeviceDirectory
             'ii',
             [$targetUserId, $claimingUserId]
         );
-        if ((int)($recent[0]['spent'] ?? 0) >= self::MAX_CLAIMS_PER_HOUR) {
+        // Repeats for this conversation do not count: they spend nothing.
+        $spentElsewhere = (int)($recent[0]['spent'] ?? 0) - count($reusable);
+        if ($spentElsewhere >= self::MAX_CLAIMS_PER_HOUR) {
             throw new ProtectedChatMismatch(
                 'Too many key packages have been claimed for that account recently',
                 'key_package_claim_limited'
@@ -326,6 +355,9 @@ final class DeviceDirectory
             'i',
             [$targetUserId]
         );
+        // Devices already claimed for this conversation are answered from that
+        // claim, so a repeated attempt costs nothing.
+        $claimedAgain = 0;
         if ($devices === []) {
             throw new ProtectedChatMismatch('That account has no enrolled device', 'no_enrolled_device');
         }
@@ -333,6 +365,22 @@ final class DeviceDirectory
         $claimed = [];
         foreach ($devices as $device) {
             $deviceId = (int)$device['id'];
+
+            // Already claimed for this conversation: hand back the same package
+            // rather than spending another. A retried admission is not a new one.
+            if (isset($reusable[$deviceId])) {
+                $claimedAgain++;
+                $claimed[] = [
+                    'device_id' => $deviceId,
+                    'public_id' => base64_encode((string)$device['public_id']),
+                    'signature_public_key' => base64_encode((string)$device['signature_public_key']),
+                    'key_package' => base64_encode($reusable[$deviceId]),
+                    'exhausted' => false,
+                    'reused' => true,
+                ];
+                continue;
+            }
+
             $this->conn->begin_transaction();
             try {
                 $candidate = $this->select(
@@ -355,10 +403,10 @@ final class DeviceDirectory
                 $packageId = (int)$candidate[0]['id'];
                 $consumed = $this->execute(
                     'UPDATE e2ee_key_packages
-                        SET consumed_at = NOW(), consumed_by_user_id = ?
+                        SET consumed_at = NOW(), consumed_by_user_id = ?, claimed_for_chat_id = ?
                       WHERE id = ? AND consumed_at IS NULL',
-                    'ii',
-                    [$claimingUserId, $packageId]
+                    'iii',
+                    [$claimingUserId, $chatId, $packageId]
                 );
                 if ($consumed !== 1) {
                     $this->conn->rollback();

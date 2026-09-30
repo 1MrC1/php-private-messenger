@@ -153,6 +153,20 @@
                 // A device the other account enrolled after this conversation
                 // started has to be admitted or that person reads on one device
                 // and not another.
+                // Publish more one-time key packages if this device is running
+                // low. Without a caller, a device that spent its initial ten could
+                // never be added to another conversation again — which a review
+                // pointed out twice.
+                if (!replenishedThisSession) {
+                    replenishedThisSession = true;
+                    try {
+                        await active.replenishKeyPackages();
+                    } catch (error) {
+                        // Not fatal: it will be tried again on the next page load.
+                        replenishedThisSession = false;
+                    }
+                }
+
                 try {
                     const mine = Number(currentAccountId());
                     const others = (await active.participants(chatId))
@@ -184,15 +198,42 @@
         }
 
         /**
+         * Every reason not to send, in one place.
+         *
+         * It used to be inline in the text path only, which is how attachments
+         * came to skip it. One function, called by both, and by anything added
+         * later.
+         */
+        function assertSendable(client, chatId, groupId) {
+            const record = conversations.get(chatId);
+            if (record && record.revocationCheckFailed === true) {
+                throw new Error(translate('protected.revocation_check_failed',
+                    'Could not check whether a revoked device is still in this conversation.'));
+            }
+            if (record && record.directoryCheckFailed === true) {
+                throw new Error(translate('protected.directory_changed',
+                    'The device directory does not match what this device saw before. Compare safety numbers before continuing.'));
+            }
+            const blocked = client.sendingBlocked(chatId, groupId);
+            if (blocked) {
+                notify(translate('protected.rejoin_required',
+                    'This conversation has to be rejoined before anything else is sent.'));
+                throw new Error(blocked);
+            }
+        }
+
+        /**
          * Whether a conversation is protected.
          *
-         * The row's flag comes from the server, and a review pointed out what that
+         * The row's flag comes from the server, and a review showed what that
          * means for the stated adversary: answering `is_protected: false` routed
-         * the next message to the plaintext client. Protection is irreversible, so
-         * anything this device has already established outranks what the server
-         * says now. The page-local record is consulted first because this runs on
-         * every keystroke path; `refreshProtectionPins()` fills it from the sealed
-         * store when a conversation is opened.
+         * the next message to the plaintext client, which had already put the
+         * message in a request body by the time anything else could object.
+         *
+         * So this is deliberately synchronous and consults, in order: what this
+         * page already knows, the marker the client keeps in local storage, and
+         * only then the server's flag. Protection is irreversible, so anything
+         * this device has established outranks anything the server says now.
          */
         function isProtected(chatId) {
             const known = conversations.get(chatId);
@@ -202,12 +243,45 @@
             if (pinnedProtected.has(Number(chatId))) {
                 return true;
             }
+            if (markedProtectedLocally(chatId)) {
+                pinnedProtected.add(Number(chatId));
+                return true;
+            }
             const row = doc.querySelector('.chat-item[data-chat-id="' + chatId + '"]');
             return !!row && row.dataset.protected === 'true';
         }
 
         /** Conversations this device has itself established as protected. */
         const pinnedProtected = new Set();
+        /** Key packages are topped up once per page, not once per conversation. */
+        let replenishedThisSession = false;
+
+        /**
+         * The client's own marker, read without waiting.
+         *
+         * Reading local storage directly here is not a layering violation worth
+         * fixing: the alternative is an await, and an await is what let the
+         * plaintext path win the race.
+         */
+        function markedProtectedLocally(chatId) {
+            const store = adapters.localStore ||
+                (typeof window === 'object' && window && window.localStorage) || null;
+            if (!store) {
+                return false;
+            }
+            try {
+                const account = adapters.accountId !== undefined
+                    ? adapters.accountId
+                    : (typeof window === 'object' && window ? window.currentUserId : null);
+                const key = 'pm-protected-chats' +
+                    (account === null || account === undefined ? '' : ':' + account);
+                const raw = store.getItem(key);
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) && parsed.map(Number).includes(Number(chatId));
+            } catch (error) {
+                return false;
+            }
+        }
 
         async function refreshProtectionPins(chatId) {
             try {
@@ -228,25 +302,7 @@
                     'This device has not joined that protected conversation yet'));
             }
             const client = await ensureClient();
-
-            // Fail closed rather than send into a membership we are unsure of:
-            // a revocation we could not check, a change we could not publish, or
-            // a fork the engine reported.
-            const record = conversations.get(chatId);
-            if (record && record.revocationCheckFailed === true) {
-                throw new Error(translate('protected.revocation_check_failed',
-                    'Could not check whether a revoked device is still in this conversation.'));
-            }
-            if (record && record.directoryCheckFailed === true) {
-                throw new Error(translate('protected.directory_changed',
-                    'The device directory does not match what this device saw before. Compare safety numbers before continuing.'));
-            }
-            const blocked = client.sendingBlocked(chatId, groupId);
-            if (blocked) {
-                notify(translate('protected.rejoin_required',
-                    'This conversation has to be rejoined before anything else is sent.'));
-                throw new Error(blocked);
-            }
+            assertSendable(client, chatId, groupId);
             return client.send(chatId, groupId, text);
         }
 
@@ -263,10 +319,10 @@
                     'This device has not joined that protected conversation yet'));
             }
             const client = await ensureClient();
-            const blocked = client.sendingBlocked(chatId, groupId);
-            if (blocked) {
-                throw new Error(blocked);
-            }
+            // The same guard as text. A review found attachments skipping the
+            // revocation and directory checks entirely, so a file was encrypted to
+            // a membership the device had just failed to verify.
+            assertSendable(client, chatId, groupId);
             const bytes = new Uint8Array(await file.arrayBuffer());
             return client.sendAttachment(chatId, groupId, file.name, bytes);
         }

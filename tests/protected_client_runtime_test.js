@@ -46,6 +46,8 @@ function fakeServer() {
     // Small on purpose: a cap of two proves the client pages instead of assuming
     // one request is the whole history.
     const pageCap = 2;
+    // chatId:userId -> the packages already handed out for that pair.
+    const claimScopes = new Map();
     const crypto = require('node:crypto');
     /** The preimage DeviceDirectory::entryPayload() hashes. */
     const directoryPayload = (entryType, userId, deviceId, publicId, signatureKey) => {
@@ -116,12 +118,22 @@ function fakeServer() {
                 if (!body.chat_id) {
                     return { success: false, error_code: 'not_a_participant', message: 'no conversation given' };
                 }
+                // And it answers a repeat for the same conversation from the
+                // package already spent, as the server does, so a test cannot pass
+                // by spending packages the server would not have spent.
                 const list = devices.get(body.user_id) || [];
-                return {
+                const answer = {
                     success: true,
                     key_packages: list.map((device) => {
+                        // Reuse is per conversation *and* per device, as the server
+                        // does it: a device already claimed for this conversation
+                        // costs nothing, a device never claimed for it spends one.
+                        const scopeKey = body.chat_id + ':' + device.deviceId;
+                        if (claimScopes.has(scopeKey)) {
+                            return claimScopes.get(scopeKey);
+                        }
                         const next = device.keyPackages.shift();
-                        return next
+                        const claimed = next
                             ? {
                                 device_id: device.deviceId,
                                 // The enrolled key, which the admitting client
@@ -131,8 +143,13 @@ function fakeServer() {
                                 exhausted: false,
                             }
                             : { device_id: device.deviceId, key_package: null, exhausted: true };
+                        if (claimed.exhausted === false) {
+                            claimScopes.set(scopeKey, Object.assign({}, claimed, { reused: true }));
+                        }
+                        return claimed;
                     }),
                 };
+                return answer;
             }
             case 'get_directory_log': {
                 const after = Number(body.after_seq || 0);
@@ -166,6 +183,23 @@ function fakeServer() {
                 list.push({ sequence: list.length + 1, kind: body.kind, epoch: body.epoch, payload: body.payload });
                 handshakes.set(body.chat_id, list);
                 return { success: true, sequence: list.length };
+            }
+            case 'post_handshake_batch': {
+                // One transaction, consecutive sequences, exactly as the server
+                // does it: nothing can be wedged between a commit and its welcome.
+                const list = handshakes.get(body.chat_id) || [];
+                const sequences = [];
+                for (const message of body.messages) {
+                    list.push({
+                        sequence: list.length + 1,
+                        kind: message.kind,
+                        epoch: message.epoch,
+                        payload: message.payload,
+                    });
+                    sequences.push(list.length);
+                }
+                handshakes.set(body.chat_id, list);
+                return { success: true, sequences };
             }
             case 'get_handshakes': {
                 const list = handshakes.get(body.chat_id) || [];
@@ -397,7 +431,8 @@ function fakeServer() {
         const realPost = server.post;
         let rejectPublication = false;
         server.post = async (url, body) => {
-            if (rejectPublication && body.action === 'post_handshake') {
+            if (rejectPublication &&
+                (body.action === 'post_handshake' || body.action === 'post_handshake_batch')) {
                 return { success: false, message: 'the server refused this handshake' };
             }
             return realPost(url, body);
@@ -481,6 +516,52 @@ function fakeServer() {
                 'message ' + index + ' past the page cap is fetched and opened');
         }
         console.log('PASS: messages past the first page are fetched and decrypted');
+    }
+
+    // ---- recovery is not a way around a security state ----------------------
+    // A review exported a recovery file from a device blocked from sending on an
+    // unpublished branch, restored it elsewhere, and found the block gone.
+
+    {
+        const blockedChat = 80;
+        const store = memoryStorage();
+        const client = build(1, store);
+        // Plenty of key packages: this case is about the block surviving export,
+        // not about exhaustion.
+        await client.enroll({
+            identity: 'blocked-export@example', currentPassword: 'secret',
+            secondFactorCode: '808080', keyPackageCount: 12,
+        });
+        // A fresh account with its own packages, so this case tests the block and
+        // not exhaustion left over from earlier cases.
+        const guest = build(31, memoryStorage());
+        await guest.enroll({
+            identity: 'guest@example', currentPassword: 'secret',
+            secondFactorCode: '313131', keyPackageCount: 4,
+        });
+        await server.post('api/chat.php', { action: 'protect_chat', chat_id: blockedChat, __userId: 1 });
+        const own = await client.startConversation(blockedChat, 1).catch(() => null);
+
+        if (own && own.groupId) {
+            const realPost = server.post;
+            server.post = async (url, body) => (
+                body.action === 'post_handshake' || body.action === 'post_handshake_batch'
+                    ? { success: false, message: 'refused' }
+                    : realPost(url, body)
+            );
+            await assert.rejects(() => client.admitDevices(blockedChat, own.groupId, 31), /refused|published/);
+            server.post = realPost;
+            assert.ok(client.sendingBlocked(blockedChat, own.groupId), 'the device is blocked from sending');
+
+            const exported = await client.createRecoveryFile();
+            const elsewhere = build(1, memoryStorage());
+            await elsewhere.restoreFromRecoveryFile(exported.file, exported.passphrase);
+            assert.ok(elsewhere.sendingBlocked(blockedChat, own.groupId),
+                'a device restored from that file is blocked too, rather than starting clean');
+            await assert.rejects(() => elsewhere.send(blockedChat, own.groupId, 'from the unpublished branch'),
+                /rejoined/, 'so recovery is not a way around the block');
+            console.log('PASS: recovery carries the block, not just the keys');
+        }
     }
 
     // ---- the directory chain is actually verified ---------------------------

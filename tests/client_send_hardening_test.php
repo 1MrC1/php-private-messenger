@@ -205,13 +205,13 @@ clientSendAssert(
 );
 
 clientSendAssert(
-    str_contains($index, 'assets/css/style.css?v=20260929.3') &&
-        str_contains($index, 'i18n.js?v=20260929.3') &&
-        str_contains($index, 'script-ori_2025-06-07_02.js?v=20260929.3') &&
-        str_contains($index, 'security-hardening.js?v=20260929.3') &&
-        str_contains($index, 'ui-enhancements.js?v=20260929.3') &&
-        str_contains($index, 'csp-events.js?v=20260929.3') &&
-        str_contains($index, 'chat-ux.js?v=20260929.3'),
+    str_contains($index, 'assets/css/style.css?v=20260930.1') &&
+        str_contains($index, 'i18n.js?v=20260930.1') &&
+        str_contains($index, 'script-ori_2025-06-07_02.js?v=20260930.1') &&
+        str_contains($index, 'security-hardening.js?v=20260930.1') &&
+        str_contains($index, 'ui-enhancements.js?v=20260930.1') &&
+        str_contains($index, 'csp-events.js?v=20260930.1') &&
+        str_contains($index, 'chat-ux.js?v=20260930.1'),
     'the deployed client cache key includes message-send hardening'
 );
 

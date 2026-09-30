@@ -896,6 +896,7 @@
     "protected.not_enrolled": "本裝置尚未為受保護對話完成設定",
     "protected.admit_failed": "對方帳戶的某台裝置無法加入這個對話。",
     "protected.attachment": "加密檔案",
-    "api.key_packages_required": "需要金鑰套件"
+    "api.key_packages_required": "需要金鑰套件",
+    "api.handshake_messages_required": "需要交握訊息"
   }
 }

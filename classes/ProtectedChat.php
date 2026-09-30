@@ -38,6 +38,8 @@ final class ProtectedChat
     public const CONTENT_TYPES = [1, 2, 3];
     /** 1 proposal, 2 commit, 3 welcome. */
     public const HANDSHAKE_KINDS = [1, 2, 3];
+    /** A commit plus its welcome, or a small ordered group of them. */
+    public const MAX_HANDSHAKE_BATCH = 8;
 
     private const SCHEMA_CACHE_TTL = 300;
 
@@ -467,6 +469,91 @@ final class ProtectedChat
      * concurrent commits cannot claim the same slot; the unique key turns any
      * remaining race into a database error rather than a silent divergence.
      */
+    /**
+     * Publish several handshake messages as one contiguous block.
+     *
+     * A commit and the welcome that goes with it are one change. Published as two
+     * requests they can be separated: a third review inserted a removal between
+     * them, and the joining device — which had walked past both commits as
+     * `unknown-group` — then joined the older welcome and sent to a membership
+     * that no longer existed, which the removed device could read.
+     *
+     * One transaction, consecutive sequence numbers, so nothing can be wedged
+     * between them.
+     *
+     * @param list<array{kind: int, epoch: int, payload: string}> $messages
+     */
+    public function postHandshakeBatch(int $chatId, int $userId, array $messages): array
+    {
+        $this->assertProtectionMatches($chatId, true);
+        if (!$this->isParticipant($chatId, $userId)) {
+            throw new ProtectedChatMismatch('You are not in this conversation', 'not_a_participant');
+        }
+        if ($messages === [] || count($messages) > self::MAX_HANDSHAKE_BATCH) {
+            throw new ProtectedChatMismatch('Invalid handshake batch', 'invalid_handshake');
+        }
+
+        $decoded = [];
+        foreach ($messages as $message) {
+            $kind = (int)($message['kind'] ?? 0);
+            $epoch = (int)($message['epoch'] ?? -1);
+            if (!in_array($kind, self::HANDSHAKE_KINDS, true) || $epoch < 0) {
+                throw new ProtectedChatMismatch('Invalid handshake message', 'invalid_handshake');
+            }
+            $decoded[] = [
+                'kind' => $kind,
+                'epoch' => $epoch,
+                'payload' => self::decodeBounded(
+                    (string)($message['payload'] ?? ''),
+                    self::MAX_HANDSHAKE_BYTES,
+                    'handshake payload'
+                ),
+            ];
+        }
+
+        $this->conn->begin_transaction();
+        try {
+            $locked = $this->select(
+                'SELECT next_sequence FROM mls_groups WHERE chat_id = ? FOR UPDATE',
+                'i',
+                [$chatId]
+            );
+            if ($locked === []) {
+                throw new ProtectedChatMismatch('This conversation has no group', 'group_missing');
+            }
+
+            $sequence = (int)$locked[0]['next_sequence'];
+            $sequences = [];
+            $highestEpoch = 0;
+            foreach ($decoded as $message) {
+                $this->execute(
+                    'INSERT INTO mls_handshake_messages (chat_id, sequence, epoch, kind, sender_user_id, payload)
+                     VALUES (?, ?, ?, ?, ?, ?)',
+                    'iiiiis',
+                    [$chatId, $sequence, $message['epoch'], $message['kind'], $userId, $message['payload']]
+                );
+                $sequences[] = $sequence;
+                $highestEpoch = max($highestEpoch, $message['epoch']);
+                $sequence++;
+            }
+
+            $this->execute(
+                'UPDATE mls_groups
+                    SET next_sequence = ?,
+                        current_epoch = GREATEST(current_epoch, ?)
+                  WHERE chat_id = ?',
+                'iii',
+                [$sequence, $highestEpoch, $chatId]
+            );
+            $this->conn->commit();
+        } catch (Throwable $error) {
+            $this->conn->rollback();
+            throw $error;
+        }
+
+        return ['sequences' => $sequences, 'epoch' => $highestEpoch];
+    }
+
     public function postHandshake(int $chatId, int $userId, int $kind, int $epoch, string $payloadBase64): array
     {
         $this->assertProtectionMatches($chatId, true);

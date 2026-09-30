@@ -34,6 +34,72 @@ protectedAssert(
     'the plaintext fingerprint still distinguishes content'
 );
 
+// ---- the interface and the client must agree on their contract --------------
+// A third review found `protected-ui.js` calling `client.knownProtected()`, which
+// the client did not have: the TypeError was swallowed by a catch, the protection
+// pin was never set, and the test double implemented the missing method so every
+// suite stayed green. The whole class of defect is removed by checking the
+// contract here rather than trusting either side.
+
+$uiSource = (string)file_get_contents($root . '/assets/js/protected-ui.js');
+$clientSource = (string)file_get_contents($root . '/assets/js/protected-chat.js');
+
+preg_match('/return \{ resume,[^}]*\}/', $clientSource, $exportMatch);
+protectedAssert($exportMatch !== [], 'the client has an export list to compare against');
+// Strip the literal wrapper, not a character set: trimming the characters of
+// "return {}" also ate the first letters of the first name.
+$exportedRaw = trim(substr($exportMatch[0], strlen('return {'), -1));
+$exported = array_map('trim', explode(',', $exportedRaw));
+$exported = array_filter($exported, static fn(string $name): bool => $name !== '');
+
+preg_match_all('/\b(?:client|active)\.([a-zA-Z_][a-zA-Z0-9_]*)\(/', $uiSource, $callMatches);
+$called = array_values(array_unique($callMatches[1]));
+protectedAssert($called !== [], 'the interface calls the client at all');
+
+$missing = array_values(array_diff($called, $exported));
+protectedAssert(
+    $missing === [],
+    'every client method the interface calls is exported by the client' .
+        ($missing === [] ? '' : ': ' . implode(', ', $missing))
+);
+
+// The same for the test double: a double that implements more than the client is
+// a suite that cannot see a missing method.
+$uiTest = (string)file_get_contents($root . '/tests/protected_ui_runtime_test.js');
+preg_match('/function fakeClient\(options\) \{.*?\n\}/s', $uiTest, $doubleMatch);
+protectedAssert($doubleMatch !== [], 'the interface test has a client double');
+// Only the methods, not the bookkeeping fields the double keeps for its own
+// assertions.
+preg_match_all(
+    '/^\s{8}([a-zA-Z_][a-zA-Z0-9_]*):\s*(?:async\s*)?(?:\(|function)/m',
+    $doubleMatch[0],
+    $doubleMatches
+);
+$doubled = array_values(array_diff(array_unique($doubleMatches[1]), ['state']));
+$inventedByTheDouble = array_values(array_diff($doubled, $exported));
+protectedAssert(
+    $inventedByTheDouble === [],
+    'the double implements nothing the real client lacks' .
+        ($inventedByTheDouble === [] ? '' : ': ' . implode(', ', $inventedByTheDouble))
+);
+
+// The decision about whether to encrypt must not wait on anything.
+protectedAssert(
+    preg_match('/function isProtected\(chatId\) \{/', $uiSource) === 1 &&
+        preg_match('/async function isProtected/', $uiSource) === 0,
+    'the encrypt-or-not decision is synchronous, so no plaintext path can win a race to it'
+);
+protectedAssert(
+    str_contains($uiSource, 'markedProtectedLocally(chatId)'),
+    'and it consults what this device established before the server flag'
+);
+// One definition plus one call from each of the two send paths.
+protectedAssert(
+    substr_count($uiSource, 'function assertSendable(') === 1 &&
+        substr_count($uiSource, 'assertSendable(client, chatId, groupId);') === 2,
+    'text and attachment sends share one pre-send guard'
+);
+
 // ---- the ciphertext retry path is integrated, not just written -------------
 // A review found `envelopeFingerprint()` had no production caller, so the retry
 // protection it was written for did not exist in practice. These pin the wiring;

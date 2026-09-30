@@ -896,6 +896,7 @@
     "protected.not_enrolled": "لم يُهيَّأ هذا الجهاز بعد للمحادثات المحمية",
     "protected.admit_failed": "لم يتمكّن أحد أجهزة الحساب الآخر من الانضمام إلى هذه المحادثة.",
     "protected.attachment": "ملف مشفَّر",
-    "api.key_packages_required": "حِزم المفاتيح مطلوبة"
+    "api.key_packages_required": "حِزم المفاتيح مطلوبة",
+    "api.handshake_messages_required": "رسائل المصافحة مطلوبة"
   }
 }

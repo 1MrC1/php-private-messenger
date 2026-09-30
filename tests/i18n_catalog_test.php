@@ -455,6 +455,7 @@ Failed to update settings
 Failed to update typing status
 First name and last name are required
 First name and last name contain invalid characters
+Handshake messages are required
 Hourly upload attempt limit reached
 Invalid 2FA code
 Invalid 2FA code or backup code
@@ -597,8 +598,8 @@ PM_API_ENVELOPE_SOURCES
 ));
 i18nCatalogAssert(
     is_array($requiredApiEnvelopeSources) &&
-        count($requiredApiEnvelopeSources) === 201 &&
-        count(array_unique($requiredApiEnvelopeSources)) === 201,
+        count($requiredApiEnvelopeSources) === 202 &&
+        count(array_unique($requiredApiEnvelopeSources)) === 202,
     'the audited public API envelope source fixture is complete and duplicate-free'
 );
 $missingApiEnvelopeSources = [];

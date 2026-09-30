@@ -792,6 +792,7 @@ try {
         case 'send_protected_message':
         case 'get_protected_envelopes':
         case 'post_handshake':
+        case 'post_handshake_batch':
         case 'get_handshakes':
             // Protected conversations are storage-only for now: the server
             // relays opaque ciphertext and public MLS handshake material. No
@@ -862,6 +863,23 @@ try {
                                 (int)($input['limit'] ?? ProtectedChat::MAX_PAGE)
                             ),
                         ];
+                        break;
+
+                    case 'post_handshake_batch':
+                        // A commit and its welcome are one change; published
+                        // separately another commit can be wedged between them.
+                        $batch = $input['messages'] ?? null;
+                        if (!is_array($batch) || $batch === []) {
+                            throw new InvalidArgumentException('Handshake messages are required');
+                        }
+                        $response = ['success' => true] + $protected->postHandshakeBatch(
+                            $protectedChatId,
+                            $currentUserId,
+                            array_values(array_map(
+                                static fn($message): array => is_array($message) ? $message : [],
+                                $batch
+                            ))
+                        );
                         break;
 
                     case 'post_handshake':

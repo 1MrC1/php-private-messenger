@@ -896,6 +896,7 @@
     "protected.not_enrolled": "本设备尚未为受保护会话完成设置",
     "protected.admit_failed": "对方账户的某台设备无法加入这个会话。",
     "protected.attachment": "加密文件",
-    "api.key_packages_required": "需要密钥包"
+    "api.key_packages_required": "需要密钥包",
+    "api.handshake_messages_required": "需要握手消息"
   }
 }

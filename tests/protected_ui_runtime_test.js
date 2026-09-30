@@ -72,6 +72,10 @@ function fakeClient(options) {
         },
         sendingBlocked: () => options.sendingBlocked || null,
         participants: async () => options.participants || [],
+        replenishKeyPackages: async () => {
+            state.replenishments = (state.replenishments || 0) + 1;
+            return { published: 0 };
+        },
         knownProtected: async () => options.knownProtected === true,
         sendAttachment: async (chatId, groupId, name, bytes) => {
             state.attachments = state.attachments || [];
@@ -367,6 +371,39 @@ function fakeClient(options) {
         assert.equal(ui.isProtected(42), true,
             'once this device has established protection, the server cannot unsay it');
         console.log('PASS: a server claiming a protected conversation is plaintext is not believed');
+    }
+
+    // ---- the guards apply to attachments too, and replenishment runs --------
+    // A review found attachments skipping the revocation and directory checks
+    // entirely, and `replenishKeyPackages()` with no caller at all.
+
+    {
+        const doc = fakeDocument([]);
+        doc.markChatProtected(42, true);
+        const client = fakeClient({ enrolled: true, revocationFails: true, participants: [1, 2] });
+        const ui = makeUi(doc, client, () => {});
+
+        await ui.adoptConversation(42);
+        await assert.rejects(
+            () => ui.sendAttachment(42, { name: 'x.pdf', arrayBuffer: async () => new Uint8Array([1]).buffer }),
+            /revoked device/,
+            'an attachment is refused while the revocation check is failing, exactly as text is'
+        );
+        assert.equal((client.state.attachments || []).length, 0, 'and nothing was encrypted or sent');
+        console.log('PASS: attachments obey the same pre-send guard as text');
+    }
+
+    {
+        const doc = fakeDocument([]);
+        doc.markChatProtected(42, true);
+        const client = fakeClient({ enrolled: true, participants: [1, 2] });
+        const ui = makeUi(doc, client);
+
+        await ui.adoptConversation(42);
+        await ui.adoptConversation(42);
+        assert.equal(client.state.replenishments, 1,
+            'key packages are topped up once per page rather than never, or once per open');
+        console.log('PASS: key-package replenishment actually runs');
     }
 
     console.log('Protected interface runtime tests passed.');

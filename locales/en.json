@@ -896,6 +896,7 @@
     "protected.not_enrolled": "This device is not set up for protected conversations yet",
     "protected.admit_failed": "A device of the other account could not be added to this conversation.",
     "protected.attachment": "Encrypted file",
-    "api.key_packages_required": "Key packages are required"
+    "api.key_packages_required": "Key packages are required",
+    "api.handshake_messages_required": "Handshake messages are required"
   }
 }

@@ -136,6 +136,10 @@
             const known = await readSealed(conversationsId, {});
             const existing = known[String(chatId)] || {};
             known[String(chatId)] = {
+                // Protection cannot be turned off once a conversation has it, so a
+                // device that has ever seen a group for this conversation records
+                // that fact and never asks the server again.
+                protected: existing.protected === true || !!(groupIdBase64 || existing.groupId),
                 groupId: groupIdBase64 || existing.groupId || null,
                 lastSequence: (cursors && cursors.lastSequence !== undefined)
                     ? cursors.lastSequence
@@ -145,6 +149,9 @@
                     : (existing.lastMessageId || 0),
             };
             await writeSealed(conversationsId, known);
+            if (known[String(chatId)].protected === true) {
+                markProtected(chatId);
+            }
             return known[String(chatId)];
         }
 
@@ -400,34 +407,30 @@
                 // failure is now an error, and the conversation is marked as
                 // needing republication so nothing is sent from a state the
                 // others never saw.
-                const publishedCommit = await post('api/chat.php', {
-                    action: 'post_handshake',
+                // One request, one transaction, consecutive sequence numbers.
+                // Two requests could be separated: a third review wedged a
+                // removal between the commit and its welcome, and the joining
+                // device walked past both commits as `unknown-group` and then
+                // joined the older welcome — sending to a membership that no
+                // longer existed, which the removed device could read.
+                const published = await post('api/chat.php', {
+                    action: 'post_handshake_batch',
                     chat_id: chatId,
-                    kind: 2,
-                    epoch,
-                    payload: toBase64(added.commit),
+                    messages: [
+                        { kind: 2, epoch, payload: toBase64(added.commit) },
+                        {
+                            kind: 3,
+                            epoch,
+                            payload: toBase64(concat(lengthPrefixed(added.welcome), added.ratchet_tree)),
+                        },
+                    ],
                 });
-                if (!publishedCommit || publishedCommit.success !== true) {
+                if (!published || published.success !== true) {
                     unpublished.add(Number(chatId));
                     await saveBlocks();
                     throw new Error(
-                        (publishedCommit && publishedCommit.message) ||
+                        (published && published.message) ||
                         'The group change could not be published, so this conversation needs to be rejoined'
-                    );
-                }
-                const publishedWelcome = await post('api/chat.php', {
-                    action: 'post_handshake',
-                    chat_id: chatId,
-                    kind: 3,
-                    epoch,
-                    payload: toBase64(concat(lengthPrefixed(added.welcome), added.ratchet_tree)),
-                });
-                if (!publishedWelcome || publishedWelcome.success !== true) {
-                    unpublished.add(Number(chatId));
-                    await saveBlocks();
-                    throw new Error(
-                        (publishedWelcome && publishedWelcome.message) ||
-                        'The invitation could not be published, so the new device cannot join yet'
                     );
                 }
                 admitted++;
@@ -449,6 +452,32 @@
             let joinedGroupId = null;
             let applied = 0;
             let lastSequence = afterSequence || 0;
+            // Handshakes for a group this device has not joined yet, held in case
+            // a welcome later in the queue makes them ours.
+            const deferred = [];
+
+            async function replayDeferred() {
+                let newlyApplied = 0;
+                const held = deferred.splice(0, deferred.length);
+                for (const entry of held) {
+                    let outcome;
+                    try {
+                        outcome = session.apply_handshake(entry.payload);
+                    } catch (error) {
+                        incomplete.add(Number(chatId));
+                        await saveBlocks();
+                        throw new Error(
+                            'A group change this device had set aside could not be applied (sequence ' +
+                            entry.sequence + '), so this conversation must be rejoined'
+                        );
+                    }
+                    if (outcome === 'applied') {
+                        newlyApplied++;
+                    }
+                }
+                return newlyApplied;
+            }
+
             let pages = 0;
             let complete = false;
 
@@ -486,6 +515,9 @@
                         try {
                             const split = readLengthPrefixed(payload);
                             joinedGroupId = session.join_group(split.head, split.tail);
+                            // Anything we set aside before joining may belong to
+                            // this group after all.
+                            applied += await replayDeferred();
                         } catch (error) {
                             // A welcome addressed to another device is not an error
                             // for this one; it simply cannot open it.
@@ -515,6 +547,13 @@
                     }
                     if (outcome === 'applied') {
                         applied++;
+                    } else if (outcome === 'unknown-group') {
+                        // Keep it rather than stepping over it. This device may be
+                        // about to join from a welcome later in the same queue, and
+                        // a commit walked past is a commit lost — which is how a
+                        // review got a newly joined device to send to a membership
+                        // that had already changed.
+                        deferred.push({ sequence, payload });
                     }
                 }
             }
@@ -527,6 +566,9 @@
             if (incomplete.delete(Number(chatId))) {
                 await saveBlocks();
             }
+            // Whatever is left belongs to a group this device is not in and never
+            // joined during this walk, which is normal for a shared queue.
+            deferred.length = 0;
 
             await saveSession();
 
@@ -797,6 +839,77 @@
             }
             await saveSession();
             return messages;
+        }
+
+        /**
+         * Whether this device has itself established that a conversation is
+         * protected.
+         *
+         * Two stores, deliberately. The sealed record is authoritative and holds
+         * the group mapping. The marker is a plain list of conversation ids, kept
+         * where a *synchronous* check can reach it, because the decision "does
+         * this message go through encryption" cannot wait on an async lookup — a
+         * third review showed that waiting meant the legacy plaintext path had
+         * already been taken, and that the method this relied on did not exist at
+         * all while the error was swallowed. The marker reveals only which
+         * conversations are protected, which the server's own flag already says.
+         */
+        async function knownProtected(chatId) {
+            if (markedProtected(chatId)) {
+                return true;
+            }
+            const recalled = await recallConversation(chatId);
+            const known = !!(recalled && (recalled.protected === true || recalled.groupId));
+            if (known) {
+                markProtected(chatId);
+            }
+            return known;
+        }
+
+        function localStore() {
+            if (adapters.localStore) {
+                return adapters.localStore;
+            }
+            return typeof localStorage === 'object' && localStorage ? localStorage : null;
+        }
+
+        function markerKey() {
+            return 'pm-protected-chats' + scope;
+        }
+
+        function markProtected(chatId) {
+            const store = localStore();
+            if (!store) {
+                return;
+            }
+            try {
+                const current = markedList(store);
+                if (!current.includes(Number(chatId))) {
+                    current.push(Number(chatId));
+                    store.setItem(markerKey(), JSON.stringify(current));
+                }
+            } catch (error) {
+                // Storage denied: the device still works, it just cannot remember
+                // this across page loads.
+            }
+        }
+
+        function markedProtected(chatId) {
+            const store = localStore();
+            if (!store) {
+                return false;
+            }
+            try {
+                return markedList(store).includes(Number(chatId));
+            } catch (error) {
+                return false;
+            }
+        }
+
+        function markedList(store) {
+            const raw = store.getItem(markerKey());
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed.map(Number).filter(Number.isInteger) : [];
         }
 
         /**
@@ -1258,9 +1371,19 @@
             // knew its keys but not which MLS group each conversation used, so it
             // could not reopen anything without that mapping from somewhere else.
             // It travels inside the ciphertext.
+            // Everything that limits this device travels with it. A review
+            // exported a recovery file from a device that was blocked from sending
+            // on an unpublished branch, restored it elsewhere, and found the block
+            // gone: recovery must not be a way around a security state.
             const payload = JSON.stringify({
                 state: toBase64(session.export_state()),
                 conversations: await readSealed(conversationsId, {}),
+                blocks: {
+                    unpublished: Array.from(unpublished),
+                    incomplete: Array.from(incomplete),
+                },
+                directoryHead: await readSealed(directoryHeadId, { seq: 0, digest: null, entries: {} }),
+                bindings: await readSealed(bindingsId, {}),
             });
             const sealed = new Uint8Array(
                 await subtle.encrypt(
@@ -1338,6 +1461,33 @@
             // the right keys and still be unable to open anything.
             if (restored.conversations && typeof restored.conversations === 'object') {
                 await writeSealed(conversationsId, restored.conversations);
+                for (const [chatId, record] of Object.entries(restored.conversations)) {
+                    if (record && record.protected === true) {
+                        markProtected(Number(chatId));
+                    }
+                }
+            }
+
+            // And the state that limits it: blocks first, so nothing can be sent
+            // in the window between restoring the session and restoring them.
+            unpublished.clear();
+            incomplete.clear();
+            const blocks = restored.blocks || {};
+            for (const chatId of blocks.unpublished || []) {
+                unpublished.add(Number(chatId));
+            }
+            for (const chatId of blocks.incomplete || []) {
+                incomplete.add(Number(chatId));
+            }
+            await saveBlocks();
+
+            // The pinned directory head and key bindings too, or a restored device
+            // would accept a history and an ownership claim it had already refused.
+            if (restored.directoryHead && typeof restored.directoryHead === 'object') {
+                await writeSealed(directoryHeadId, restored.directoryHead);
+            }
+            if (restored.bindings && typeof restored.bindings === 'object') {
+                await writeSealed(bindingsId, restored.bindings);
             }
             return true;
         }
@@ -1448,7 +1598,7 @@
             return { epoch: where.epoch };
         }
 
-        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked, recallConversation, rememberConversation, verifyDirectory, participants, replenishKeyPackages };
+        return { resume, enroll, startConversation, admitDevices, syncGroup, send, receive, sendAttachment, openAttachment, safetyNumber, createRecoveryFile, restoreFromRecoveryFile, removeMember, enforceRevocations, sendingBlocked, recallConversation, rememberConversation, verifyDirectory, participants, replenishKeyPackages, knownProtected, markedProtected };
     }
 
     /** A retry identifier: a UUID the server uses to recognise the same send. */
