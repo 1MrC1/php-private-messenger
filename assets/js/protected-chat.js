@@ -273,7 +273,7 @@
 
             const keyPackages = [];
             for (let index = 0; index < (options.keyPackageCount || 10); index++) {
-                keyPackages.push(toBase64(session.create_key_package()));
+                keyPackages.push(toBase64(newKeyPackage().material));
             }
 
             const response = await post('api/settings.php', {
@@ -377,8 +377,7 @@
                 // working group: block it until the conversation is reopened.
                 unpublished.add(Number(chatId));
                 incomplete.add(Number(chatId));
-                pendingRejoin.add(Number(chatId));
-                await saveBlocks();
+                await requireRejoin(chatId);
                 throw new Error(
                     (protect && protect.message) ||
                     'Could not confirm that this conversation was protected; it must be reopened before use'
@@ -518,8 +517,8 @@
             // Handshakes for a group this device has not joined yet, held in case
             // a welcome later in the queue makes them ours.
             const deferred = [];
-            /** Digests of payloads this walk applied. Content, not server metadata. */
-            const appliedDigests = new Set();
+            /** Whether this walk was re-admitted through the awaited key package. */
+            let rejoinedThisWalk = false;
 
             async function replayDeferred() {
                 let newlyApplied = 0;
@@ -530,8 +529,7 @@
                         outcome = session.apply_handshake(entry.payload);
                     } catch (error) {
                         incomplete.add(Number(chatId));
-                        pendingPayload.set(Number(chatId), await payloadDigest(entry.payload));
-                        await saveBlocks();
+                        await requireRejoin(chatId);
                         throw new Error(
                             'A group change this device had set aside could not be applied (sequence ' +
                             entry.sequence + '), so this conversation must be rejoined'
@@ -539,7 +537,6 @@
                     }
                     if (outcome === 'applied') {
                         newlyApplied++;
-                        appliedDigests.add(await payloadDigest(entry.payload));
                     }
                 }
                 return newlyApplied;
@@ -564,12 +561,12 @@
                     break;
                 }
 
+                const awaitingRejoin = pendingRejoin.has(Number(chatId));
                 for (const entry of handshakes) {
                     const sequence = Number(entry.sequence);
-                    if (sequence !== lastSequence + 1) {
+                    if (sequence !== lastSequence + 1 && !awaitingRejoin) {
                         incomplete.add(Number(chatId));
-                        pendingRejoin.add(Number(chatId));
-                        await saveBlocks();
+                        await requireRejoin(chatId);
                         throw new Error(
                             'The group history for this conversation has a gap at ' + sequence +
                             ', so it cannot be trusted until it is rejoined'
@@ -578,6 +575,17 @@
                     lastSequence = sequence;
 
                     const payload = fromBase64(entry.payload);
+
+                    // While waiting to be re-admitted, this device's group state
+                    // is written off: commits belong to a history it has given up
+                    // on, and trying them again would only fail again. Only a
+                    // welcome can help, so only a welcome is looked at. Without
+                    // this the conversation could never be repaired at all, which
+                    // is a fine way to make people turn the feature off.
+                    if (awaitingRejoin && entry.kind !== 3) {
+                        continue;
+                    }
+
                     if (entry.kind === 3) {
                         // A welcome, carrying the ratchet tree the joiner needs.
                         //
@@ -591,6 +599,19 @@
                         let joinedHere = false;
                         try {
                             const split = readLengthPrefixed(payload);
+                            const mark = pendingRejoin.get(Number(chatId));
+                            if (mark !== undefined && mark !== null) {
+                                // Does this welcome admit a key package this
+                                // device created after it gave up? Checked before
+                                // joining, so a welcome the server kept from
+                                // before the failure cannot pass.
+                                const recipients = mls.MlsSession
+                                    .welcome_recipients(split.head)
+                                    .map((reference) => toBase64(reference));
+                                if (recipients.some((reference) => (keyPackageAges.get(reference) || 0) >= mark)) {
+                                    rejoinedThisWalk = true;
+                                }
+                            }
                             joinedGroupId = session.join_group(split.head, split.tail);
                             joinedHere = true;
                         } catch (error) {
@@ -620,16 +641,14 @@
                         outcome = session.apply_handshake(payload);
                     } catch (error) {
                         incomplete.add(Number(chatId));
-                        pendingPayload.set(Number(chatId), await payloadDigest(payload));
-                        await saveBlocks();
+                        await requireRejoin(chatId);
                         throw new Error(
-                            'A group change in this conversation could not be read (sequence ' + sequence +
+                            'A group change in this conversation could not be applied (sequence ' + sequence +
                             '), so it must be rejoined before anything else is sent'
                         );
                     }
                     if (outcome === 'applied') {
                         applied++;
-                        appliedDigests.add(await payloadDigest(payload));
                     } else if (outcome === 'unknown-group') {
                         // Keep it rather than stepping over it. This device may be
                         // about to join from a welcome later in the same queue, and
@@ -643,8 +662,7 @@
 
             if (!complete) {
                 incomplete.add(Number(chatId));
-                pendingRejoin.add(Number(chatId));
-                await saveBlocks();
+                await requireRejoin(chatId);
                 throw new Error('This conversation has more group history than could be fetched at once');
             }
             // Only clear the block if this walk actually accounted for everything.
@@ -665,16 +683,18 @@
             // say, which is not the same as this device being caught up — that
             // difference is what a review used to clear a removal block.
             if (incomplete.has(Number(chatId))) {
-                const waitingFor = pendingPayload.get(Number(chatId));
-                const satisfied = waitingFor !== undefined && appliedDigests.has(waitingFor);
-                if (satisfied && !pendingRejoin.has(Number(chatId))) {
+                // Cleared only by being re-admitted through the key package this
+                // device published after it lost track. Nothing that merely
+                // applies can lift this, because "it applied" and "I am no longer
+                // missing a change" are different statements.
+                if (rejoinedThisWalk) {
                     incomplete.delete(Number(chatId));
-                    pendingPayload.delete(Number(chatId));
+                    pendingRejoin.delete(Number(chatId));
                     await saveBlocks();
                 } else {
                     throw new Error(
-                        'This conversation is missing a group change this device could not apply, so it ' +
-                        'must be rejoined before anything else is sent'
+                        'This conversation is missing a group change this device could not apply. It has ' +
+                        'to be rejoined: a member of the conversation must add this device again.'
                     );
                 }
             }
@@ -711,21 +731,23 @@
         /** Conversations whose group history could not be fetched completely. */
         const incomplete = new Set();
         /**
-         * What each incomplete conversation is waiting to account for, by content.
+         * Conversations this device cannot account for, and the key package it is
+         * waiting to be re-admitted through.
          *
-         * First this was a flag, and an empty page cleared it. Then it was the
-         * sequence number — and a review relabelled a *different* valid commit
-         * with that sequence, which cleared the block and let the removed device
-         * keep reading. The sequence is the server's to choose; the bytes are not.
+         * Three rules have been tried here and two were unsound. A flag was
+         * cleared by an empty page. A sequence number was cleared by relabelling a
+         * different valid commit. A payload digest was cleared by supplying the
+         * missing prerequisite so the *same bytes* applied — which says nothing
+         * about the change that was actually missed, and a review used exactly
+         * that to let a removed device keep reading.
          *
-         * So the block records the digest of the payload that failed, and only
-         * applying that exact payload lifts it. A genuinely corrupt commit
-         * therefore never lifts it, which is correct: that conversation needs to
-         * be rejoined, and `pendingRejoin` says so.
+         * The rule now: a processing failure is not recoverable by applying
+         * anything. This device publishes a fresh key package and waits to be
+         * re-admitted through it. Only a current member of the group can build a
+         * welcome for that key package, and the welcome names it, so the
+         * checkpoint is the protocol's rather than the server's.
          */
-        const pendingPayload = new Map();
-        /** Conversations that cannot recover without being rejoined. */
-        const pendingRejoin = new Set();
+        const pendingRejoin = new Map();
 
         /**
          * Reasons not to send, kept on the device rather than in the page.
@@ -745,20 +767,22 @@
             for (const chatId of stored.incomplete || []) {
                 incomplete.add(Number(chatId));
             }
-            for (const [chatId, digest] of Object.entries(stored.pending || {})) {
-                pendingPayload.set(Number(chatId), String(digest));
+            for (const [chatId, mark] of Object.entries(stored.rejoin || {})) {
+                pendingRejoin.set(Number(chatId), mark === null ? null : Number(mark));
             }
-            for (const chatId of stored.rejoin || []) {
-                pendingRejoin.add(Number(chatId));
+            for (const [reference, age] of Object.entries(stored.keyPackageAges || {})) {
+                keyPackageAges.set(reference, Number(age));
             }
+            keyPackagesCreated = Math.max(Number(stored.keyPackagesCreated || 0), keyPackagesCreated);
         }
 
         async function saveBlocks() {
             await writeSealed(blockedId, {
                 unpublished: Array.from(unpublished),
                 incomplete: Array.from(incomplete),
-                pending: Object.fromEntries(pendingPayload),
-                rejoin: Array.from(pendingRejoin),
+                rejoin: Object.fromEntries(pendingRejoin),
+                keyPackageAges: Object.fromEntries(keyPackageAges),
+                keyPackagesCreated,
             });
         }
 
@@ -1026,10 +1050,66 @@
             }
         }
 
-        /** The identity of a handshake payload: its bytes, not its label. */
-        async function payloadDigest(payload) {
-            const bytes = payload instanceof Uint8Array ? payload : fromBase64(String(payload));
-            return toBase64(new Uint8Array(await subtle.digest('SHA-256', bytes)));
+        /**
+         * Every key package this device has created, with a counter for age.
+         *
+         * A repair has to be recognisable, and the awaited key package cannot be
+         * one specific package: whoever re-admits this device claims whichever of
+         * its packages is next, not the one it would like. So the rule is "a
+         * welcome for a key package this device created *after* it gave up on its
+         * state" — which a member of the conversation can satisfy with any fresh
+         * package, while a stale welcome kept by the server cannot.
+         */
+        const keyPackageAges = new Map();
+        let keyPackagesCreated = 0;
+
+        function newKeyPackage() {
+            const material = session.create_key_package();
+            const reference = toBase64(mls.MlsSession.key_package_ref(material));
+            keyPackagesCreated++;
+            keyPackageAges.set(reference, keyPackagesCreated);
+            return { material, reference, age: keyPackagesCreated };
+        }
+
+        /**
+         * Mark a conversation as needing a rejoin, and publish the key package
+         * that repair will be recognised by.
+         *
+         * Published rather than merely created, because a member of the
+         * conversation has to be able to claim it in order to add this device
+         * again.
+         */
+        async function requireRejoin(chatId) {
+            const existing = pendingRejoin.get(Number(chatId));
+            if (existing !== undefined && existing !== null) {
+                return existing;
+            }
+
+            // Anything created from here on counts as a repair; anything older
+            // does not. Recorded before the packages are made, so the mark can
+            // never be satisfied by a package that already existed.
+            const mark = keyPackagesCreated + 1;
+            try {
+                const fresh = [];
+                for (let index = 0; index < 3; index++) {
+                    fresh.push(toBase64(newKeyPackage().material));
+                }
+                await saveSession();
+                if (deviceId !== null) {
+                    await post('api/chat.php', {
+                        action: 'publish_key_packages',
+                        device_id: deviceId,
+                        key_packages: fresh,
+                    });
+                }
+            } catch (error) {
+                // Without published packages the conversation simply stays
+                // blocked, which is the safe direction.
+            }
+
+            pendingRejoin.set(Number(chatId), mark);
+            await saveBlocks();
+            return mark;
         }
 
         function localStore() {
@@ -1110,7 +1190,7 @@
 
             const packages = [];
             for (let index = 0; index < 10; index++) {
-                packages.push(toBase64(session.create_key_package()));
+                packages.push(toBase64(newKeyPackage().material));
             }
             await saveSession();
 

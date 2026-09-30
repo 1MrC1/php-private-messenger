@@ -217,6 +217,33 @@ export class MlsSession {
         return v3;
     }
     /**
+     * The reference a welcome uses to name the key package it was built for.
+     *
+     * This is the checkpoint a repair can be pinned to. A review showed why a
+     * payload digest cannot be one: a commit that failed only because its
+     * prerequisite was missing applies perfectly once the server supplies that
+     * prerequisite, so "the same bytes applied" says nothing about whether the
+     * change we actually missed was accounted for.
+     *
+     * A welcome is different. Only a current member of the group can build one,
+     * and it names the key package it admits. So a device that published a fresh
+     * key package after losing track can insist on being re-admitted through
+     * *that* key package before it trusts its own view again.
+     * @param {Uint8Array} key_package
+     * @returns {Uint8Array}
+     */
+    static key_package_ref(key_package) {
+        const ptr0 = passArray8ToWasm0(key_package, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_key_package_ref(ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
      * The signature key inside a key package, so a caller can tell whose it is
      * before deciding to add it.
      * @param {Uint8Array} key_package
@@ -394,6 +421,20 @@ export class MlsSession {
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v3;
     }
+    /**
+     * The key packages a welcome was built for, as references.
+     * @param {Uint8Array} welcome
+     * @returns {any}
+     */
+    static welcome_recipients(welcome) {
+        const ptr0 = passArray8ToWasm0(welcome, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_welcome_recipients(ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
 }
 if (Symbol.dispose) MlsSession.prototype[Symbol.dispose] = MlsSession.prototype.free;
 
@@ -503,6 +544,10 @@ function __wbg_get_imports() {
             const ret = new Object();
             return ret;
         },
+        __wbg_new_ee2291f50781bf1d: function() {
+            const ret = new Array();
+            return ret;
+        },
         __wbg_new_from_slice_9a868026ffa4208a: function(arg0, arg1) {
             const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
             return ret;
@@ -525,6 +570,10 @@ function __wbg_get_imports() {
         },
         __wbg_prototypesetcall_bc27214492979395: function(arg0, arg1, arg2) {
             Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
+        },
+        __wbg_push_2baf45db356cf468: function(arg0, arg1) {
+            const ret = arg0.push(arg1);
+            return ret;
         },
         __wbg_randomFillSync_6c25eac9869eb53c: function() { return handleError(function (arg0, arg1) {
             arg0.randomFillSync(arg1);

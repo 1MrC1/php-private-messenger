@@ -275,9 +275,9 @@ chatUxAssert(
 );
 
 chatUxAssert(
-    substr_count($index, 'v=20260930.4') === 12 &&
-        str_contains($index, 'assets/js/i18n.js?v=20260930.4') &&
-        str_contains($index, 'assets/js/chat-ux.js?v=20260930.4'),
+    substr_count($index, 'v=20260930.5') === 12 &&
+        str_contains($index, 'assets/js/i18n.js?v=20260930.5') &&
+        str_contains($index, 'assets/js/chat-ux.js?v=20260930.5'),
     'all first-party frontend layers deploy under one cache key'
 );
 

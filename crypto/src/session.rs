@@ -228,6 +228,48 @@ impl MlsSession {
         serde_wasm_like(&result)
     }
 
+    /// The reference a welcome uses to name the key package it was built for.
+    ///
+    /// This is the checkpoint a repair can be pinned to. A review showed why a
+    /// payload digest cannot be one: a commit that failed only because its
+    /// prerequisite was missing applies perfectly once the server supplies that
+    /// prerequisite, so "the same bytes applied" says nothing about whether the
+    /// change we actually missed was accounted for.
+    ///
+    /// A welcome is different. Only a current member of the group can build one,
+    /// and it names the key package it admits. So a device that published a fresh
+    /// key package after losing track can insist on being re-admitted through
+    /// *that* key package before it trusts its own view again.
+    pub fn key_package_ref(key_package: &[u8]) -> Result<Vec<u8>, JsValue> {
+        let key_package_in = KeyPackageIn::tls_deserialize(&mut &key_package[..])
+            .map_err(|error| JsValue::from_str(&format!("reading the key package failed: {error:?}")))?;
+        let crypto = RustCrypto::default();
+        let validated = key_package_in
+            .validate(&crypto, ProtocolVersion::Mls10)
+            .map_err(|error| JsValue::from_str(&format!("the key package is not valid: {error:?}")))?;
+        let reference = validated
+            .hash_ref(&crypto)
+            .map_err(|error| JsValue::from_str(&format!("hashing the key package failed: {error:?}")))?;
+        Ok(reference.as_slice().to_vec())
+    }
+
+    /// The key packages a welcome was built for, as references.
+    pub fn welcome_recipients(welcome: &[u8]) -> Result<JsValue, JsValue> {
+        let message = MlsMessageIn::tls_deserialize(&mut &welcome[..])
+            .map_err(|error| JsValue::from_str(&format!("reading the welcome failed: {error:?}")))?;
+        let welcome = match message.extract() {
+            MlsMessageBodyIn::Welcome(welcome) => welcome,
+            _ => return Err(JsValue::from_str("that is not a welcome")),
+        };
+
+        let list = js_sys::Array::new();
+        for secrets in welcome.secrets() {
+            let reference = secrets.new_member();
+            list.push(&js_sys::Uint8Array::from(reference.as_slice()).into());
+        }
+        Ok(list.into())
+    }
+
     /// Whether a device is already a member of a group.
     ///
     /// The directory hands out a key package for every live device of an

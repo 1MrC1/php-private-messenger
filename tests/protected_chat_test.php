@@ -76,19 +76,30 @@ protectedAssert(
 
 // A block is lifted by applying what it waits for, never by an empty answer.
 $clientForBlocks = (string)file_get_contents($root . '/assets/js/protected-chat.js');
-// Bound to content, not to the sequence number. The sequence was the server's
-// to choose, and a review relabelled a different valid commit with it to clear
-// the block.
+// Three rules have been tried for lifting a handshake block and two were
+// unsound: a flag (cleared by an empty page), a sequence number (cleared by
+// relabelling a different commit), and a payload digest (cleared by supplying
+// the missing prerequisite so the same bytes applied). Nothing that *applies*
+// can lift one now.
 protectedAssert(
-    str_contains($clientForBlocks, 'const pendingPayload = new Map();') &&
-        str_contains($clientForBlocks, 'appliedDigests.has(waitingFor)') &&
+    !str_contains($clientForBlocks, 'pendingPayload') &&
+        !str_contains($clientForBlocks, 'appliedDigests') &&
         !str_contains($clientForBlocks, 'appliedSequences'),
-    'a block records the digest of the payload it is waiting for, and only that payload lifts it'
+    'no block is keyed to a sequence, a flag, or a payload digest any more'
 );
 protectedAssert(
-    str_contains($clientForBlocks, 'const pendingRejoin = new Set();') &&
-        str_contains($clientForBlocks, '!pendingRejoin.has(Number(chatId))'),
-    'and a conversation that can only be repaired by rejoining is never auto-cleared'
+    str_contains($clientForBlocks, 'const pendingRejoin = new Map();') &&
+        str_contains($clientForBlocks, 'if (rejoinedThisWalk) {'),
+    'a block is lifted only by being re-admitted through a welcome'
+);
+protectedAssert(
+    str_contains($clientForBlocks, 'keyPackageAges.get(reference) || 0) >= mark') &&
+        str_contains($clientForBlocks, 'const mark = keyPackagesCreated + 1;'),
+    'and only a welcome for a key package created after the failure counts, so a stale one cannot'
+);
+protectedAssert(
+    str_contains($clientForBlocks, 'if (awaitingRejoin && entry.kind !== 3) {'),
+    'a conversation awaiting repair looks only for that welcome, so it is not stuck forever'
 );
 protectedAssert(
     preg_match('/function markProtected\(chatId\)[\s\S]{0,900}return markedList\(store\)\.includes/', $clientForBlocks) === 1,

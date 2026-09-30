@@ -117,18 +117,24 @@ process.on('uncaughtException', (error) => {
 const { context } = browserish();
 vm.createContext(context);
 
-// The real files, in the order index.html loads them. Each is a classic script,
-// so they share one global lexical scope — which is the whole point here.
-for (const file of [
-    'assets/js/i18n.js',
-    'assets/js/script-ori_2025-06-07_02.js',
-    'assets/js/security-hardening.js',
-    'assets/js/ui-enhancements.js',
-    'assets/js/csp-events.js',
-    'assets/js/chat-ux.js',
-    'assets/js/protected-chat.js',
-    'assets/js/protected-ui.js',
-]) {
+// The real files, in the order index.html actually loads them — parsed out of
+// the markup rather than listed here. A review swapped the two protected tags in
+// index.html and this test still passed, because it was running its own
+// hard-coded order; the order in the document is the thing that matters, because
+// `protected-ui.js` installs itself only if `protected-chat.js` has already
+// defined `window.PmProtected`.
+const markup = read('index.html');
+const scripts = Array.from(markup.matchAll(/<script[^>]*\ssrc="([^"]+)"/g))
+    .map((match) => match[1].split('?')[0])
+    .filter((src) => src.startsWith('assets/js/'));
+
+assert.ok(scripts.length >= 7, 'index.html loads the application scripts');
+assert.ok(
+    scripts.indexOf('assets/js/protected-chat.js') < scripts.indexOf('assets/js/protected-ui.js'),
+    'the client is loaded before the interface that installs over it'
+);
+
+for (const file of scripts) {
     try {
         vm.runInContext(read(file), context, { filename: file });
     } catch (error) {
@@ -237,8 +243,14 @@ async function routesIntoEncryption() {
         context
     );
 
-    // Reinstall the wrappers over that legacy sender, exactly as install() does.
-    vm.runInContext(read('assets/js/protected-ui.js'), context, { filename: 'protected-ui.js (reinstall)' });
+    // No reloading of protected-ui.js here. It has to install itself from the
+    // load performed above, in index.html's order — that is what the swapped-tag
+    // mutation breaks, and reloading it by hand hid exactly that.
+    assert.equal(
+        vm.runInContext('typeof window.PmProtectedUiFactory', context),
+        'object',
+        'the interface factory was installed by loading index.html\'s scripts in order'
+    );
 
     // Select a conversation and type something, the way the application does.
     vm.runInContext(

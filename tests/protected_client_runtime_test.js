@@ -111,6 +111,16 @@ function fakeServer() {
                 device.enrolledSeq = entry.seq;
                 return { success: true, device_id: device.deviceId, key_packages_stored: device.keyPackages.length };
             }
+            case 'publish_key_packages': {
+                // The real endpoint appends to the device's unconsumed packages.
+                const list = devices.get(body.__userId) || [];
+                const device = list.find((entry) => entry.deviceId === body.device_id);
+                if (!device) {
+                    return { success: false, message: 'unknown device' };
+                }
+                device.keyPackages.push(...body.key_packages);
+                return { success: true, key_packages_stored: body.key_packages.length };
+            }
             case 'claim_key_packages': {
                 // The real endpoint refuses a claim that is not for a
                 // conversation both accounts are in; the double insists on being
@@ -548,13 +558,13 @@ function fakeServer() {
         ]);
 
         await assert.rejects(() => late.syncGroup(lateChat, 0),
-            /could not be read|could not account for/,
+            /could not be applied|could not account for/,
             'a group change this device cannot apply is refused rather than stepped over');
         assert.ok(late.sendingBlocked(lateChat, null),
             'and the conversation stays blocked from sending');
 
         // Repeating the sync must not clear the block either.
-        await assert.rejects(() => late.syncGroup(lateChat, 0), /could not be read|could not account for/);
+        await assert.rejects(() => late.syncGroup(lateChat, 0), /could not be applied|rejoined/);
         assert.ok(late.sendingBlocked(lateChat, null), 'a second attempt does not forgive it');
         console.log('PASS: a deferred change that cannot be applied keeps the conversation blocked');
     }
@@ -574,13 +584,13 @@ function fakeServer() {
 
         const unusable = Buffer.from('a change this device cannot read').toString('base64');
         server.handshakes.set(stuck, [{ sequence: 1, kind: 2, epoch: 1, payload: unusable }]);
-        await assert.rejects(() => late.syncGroup(stuck, 0), /could not be read/);
+        await assert.rejects(() => late.syncGroup(stuck, 0), /could not be applied/);
         assert.ok(late.sendingBlocked(stuck, null), 'the conversation is blocked');
 
         // The server now says there is nothing more. That must not be enough.
         server.handshakes.set(stuck, []);
         await assert.rejects(() => late.syncGroup(stuck, 0),
-            /must be rejoined/,
+            /rejoined/,
             'an empty page does not lift the block');
         assert.ok(late.sendingBlocked(stuck, null), 'and sending stays refused');
         console.log('PASS: a block is only lifted by applying the change it waits for');
@@ -604,18 +614,98 @@ function fakeServer() {
 
         const corrupted = Buffer.from('a removal this device cannot read').toString('base64');
         server.handshakes.set(substituted, [{ sequence: 1, kind: 2, epoch: 1, payload: corrupted }]);
-        await assert.rejects(() => observer.syncGroup(substituted, 0), /could not be read/);
+        await assert.rejects(() => observer.syncGroup(substituted, 0), /could not be applied/);
         assert.ok(observer.sendingBlocked(substituted, null), 'the observer is blocked');
 
         // The server now offers a different payload under the same sequence.
         const different = Buffer.from('an entirely different change').toString('base64');
         server.handshakes.set(substituted, [{ sequence: 1, kind: 2, epoch: 1, payload: different }]);
         await assert.rejects(() => observer.syncGroup(substituted, 0),
-            /could not be read|must be rejoined/,
+            /could not be applied|rejoined/,
             'a different payload under the same sequence does not satisfy the block');
         assert.ok(observer.sendingBlocked(substituted, null),
             'and the conversation stays blocked, so nothing is sent on a branch it cannot account for');
         console.log('PASS: relabelling a different commit with the blocked sequence does not lift the block');
+    }
+
+    // ---- the same bytes applying later does not lift a block ---------------
+    // The sharpest version of this attack, from the seventh review: a commit
+    // that fails only because its prerequisite is missing applies perfectly once
+    // the server supplies that prerequisite. Keying the block to the payload
+    // digest therefore cleared it, while the change the device had actually
+    // missed — a removal — was never applied at all.
+
+    {
+        const prerequisite = 99;
+        const device = build(91, memoryStorage());
+        await device.enroll({
+            identity: 'prereq@example', currentPassword: 'secret',
+            secondFactorCode: '919191', keyPackageCount: 6,
+        });
+        await server.post('api/chat.php', { action: 'protect_chat', chat_id: prerequisite, __userId: 91 });
+
+        // A change this device cannot apply in its current state.
+        const failing = Buffer.from('a commit that needs a prerequisite').toString('base64');
+        server.handshakes.set(prerequisite, [{ sequence: 1, kind: 2, epoch: 2, payload: failing }]);
+        await assert.rejects(() => device.syncGroup(prerequisite, 0), /could not be applied/);
+        assert.ok(device.sendingBlocked(prerequisite, null), 'the device is blocked');
+
+        // Now the server offers a prerequisite followed by the very same bytes.
+        // Under the old rule this cleared the block.
+        server.handshakes.set(prerequisite, [
+            { sequence: 1, kind: 2, epoch: 1, payload: Buffer.from('the prerequisite').toString('base64') },
+            { sequence: 2, kind: 2, epoch: 2, payload: failing },
+        ]);
+        await assert.rejects(() => device.syncGroup(prerequisite, 0),
+            /could not be applied|rejoined/,
+            'supplying the prerequisite does not turn "these bytes applied" into "I am caught up"');
+        assert.ok(device.sendingBlocked(prerequisite, null),
+            'and the conversation is still blocked from sending');
+        console.log('PASS: replaying the same bytes with their prerequisite does not lift the block');
+    }
+
+    // ---- but a genuine rejoin does -----------------------------------------
+    // Otherwise the conversation would be bricked, and people would turn the
+    // feature off rather than live with it.
+
+    {
+        const repaired = 101;
+        const holderStore = memoryStorage();
+        const holder = build(92, holderStore);
+        await holder.enroll({
+            identity: 'repaired@example', currentPassword: 'secret',
+            secondFactorCode: '929292', keyPackageCount: 6,
+        });
+        const owner = build(93, memoryStorage());
+        await owner.enroll({
+            identity: 'owner@example', currentPassword: 'secret',
+            secondFactorCode: '939393', keyPackageCount: 6,
+        });
+        await server.post('api/chat.php', { action: 'protect_chat', chat_id: repaired, __userId: 93 });
+
+        // The holder loses track of the conversation.
+        const unreadable = Buffer.from('a change the holder cannot apply').toString('base64');
+        server.handshakes.set(repaired, [{ sequence: 1, kind: 2, epoch: 1, payload: unreadable }]);
+        await assert.rejects(() => holder.syncGroup(repaired, 0), /could not be applied/);
+        assert.ok(holder.sendingBlocked(repaired, null), 'it is blocked');
+
+        // A member of the conversation adds it again, which produces a welcome
+        // addressed to the key package the holder published when it failed.
+        // The holder published fresh packages when it failed. Spend the older
+        // ones first so the admission uses one of those fresh packages, which is
+        // what a real claim does once the earlier ones are consumed.
+        const holderDevice = server.devices.get(92)[0];
+        const freshCount = 3;
+        holderDevice.keyPackages.splice(0, holderDevice.keyPackages.length - freshCount);
+
+        const started = await owner.startConversation(repaired, 92);
+        assert.ok(started.groupId, 'a member re-admits the device');
+
+        const rejoined = await holder.syncGroup(repaired, 0);
+        assert.ok(rejoined.groupId, 'the holder joins from the new welcome');
+        assert.equal(holder.sendingBlocked(repaired, rejoined.groupId), null,
+            'and being re-admitted through a key package it created after failing clears the block');
+        console.log('PASS: a genuine re-admission repairs the conversation');
     }
 
     // ---- protection is marked before it is requested -----------------------
