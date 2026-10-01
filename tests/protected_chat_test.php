@@ -115,7 +115,7 @@ protectedAssert(
     'and only a welcome for a key package created after the failure counts, so a stale one cannot'
 );
 protectedAssert(
-    str_contains($clientForBlocks, 'if (awaitingRejoin && entry.kind !== 3) {'),
+    str_contains($clientForBlocks, 'if (repairing && entry.kind !== 3) {'),
     'a conversation awaiting repair looks only for that welcome, so it is not stuck forever'
 );
 protectedAssert(
