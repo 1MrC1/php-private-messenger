@@ -293,7 +293,8 @@ final class DeviceDirectory
         int $claimingUserId,
         int $targetUserId,
         int $chatId,
-        ProtectedChat $chats
+        ProtectedChat $chats,
+        bool $forRepair = false
     ): array {
         // Both sides must be in the conversation the claim is for. Without this
         // any authenticated account could spend another account's one-time key
@@ -349,6 +350,25 @@ final class DeviceDirectory
             $reusable = [];
             foreach ($alreadyClaimed as $row) {
                 $reusable[(int)$row['device_id']] = (string)$row['key_package'];
+            }
+
+            // Repair is the one case that must NOT reuse. A device being repaired
+            // is still in the group under its old leaf, so handing back the
+            // package already claimed for this conversation produced no commit and
+            // no welcome — the repair a review found advertised and impossible.
+            // The previous claim is released (it stays consumed; it simply stops
+            // being this conversation's claim) so a fresh package can take its
+            // place without colliding with the unique constraint.
+            if ($forRepair && $reusable !== []) {
+                $this->execute(
+                    'UPDATE e2ee_key_packages k
+                       JOIN e2ee_devices d ON d.id = k.device_id
+                        SET k.claimed_for_chat_id = NULL
+                      WHERE d.user_id = ? AND k.consumed_by_user_id = ? AND k.claimed_for_chat_id = ?',
+                    'iii',
+                    [$targetUserId, $claimingUserId, $chatId]
+                );
+                $reusable = [];
             }
 
             $recent = $this->select(

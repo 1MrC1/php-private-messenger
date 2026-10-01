@@ -172,7 +172,15 @@
                     const others = (await active.participants(chatId))
                         .filter((userId) => userId !== mine);
                     if (others.length > 0) {
-                        await admitNewDevices(chatId, record.groupId, others);
+                        // If a participant's device is waiting to be repaired, the
+                        // admission has to replace its stale leaf rather than skip
+                        // it as already present. Opening the conversation is when
+                        // that happens, so a repair needs somebody to look at it —
+                        // which is stated in the message the blocked device shows.
+                        const blocked = active.sendingBlocked(chatId, record.groupId);
+                        await admitNewDevices(chatId, record.groupId, others, {
+                            repair: blocked !== null,
+                        });
                     }
                 } catch (error) {
                     notify(translate('protected.admit_failed',
@@ -411,12 +419,12 @@
          * be able to read it, and `admitDevices()` had no caller at all. Run when
          * a conversation opens, and quiet when there is nothing to do.
          */
-        async function admitNewDevices(chatId, groupId, otherUserIds) {
+        async function admitNewDevices(chatId, groupId, otherUserIds, options) {
             const client = await ensureClient();
             let admitted = 0;
             for (const userId of otherUserIds) {
                 try {
-                    const result = await client.admitDevices(chatId, groupId, userId);
+                    const result = await client.admitDevices(chatId, groupId, userId, options);
                     admitted += result.admitted || 0;
                 } catch (error) {
                     // A device with no key packages left, or a key that does not

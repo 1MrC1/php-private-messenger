@@ -89,8 +89,25 @@ protectedAssert(
 );
 protectedAssert(
     str_contains($clientForBlocks, 'const pendingRejoin = new Map();') &&
-        str_contains($clientForBlocks, 'if (rejoinedThisWalk) {'),
-    'a block is lifted only by being re-admitted through a welcome'
+        str_contains(
+            $clientForBlocks,
+            'if (rejoinedThisWalk && complete && !repairing && deferred.length === 0) {'
+        ),
+    'a block is lifted only by a re-admission plus a complete, contiguous, fully applied walk'
+);
+// Repair mode must end at the welcome, or everything published after it is
+// skipped — which is how a removal right after a repair welcome was missed.
+protectedAssert(
+    str_contains($clientForBlocks, 'let repairing = pendingRejoin.has(Number(chatId));') &&
+        str_contains($clientForBlocks, 'if (repairing && entry.kind !== 3) {') &&
+        strpos($clientForBlocks, 'rejoinedThisWalk = true;') <
+            strpos($clientForBlocks, 'repairing = false;'),
+    'repair mode is re-read per entry and ends the moment the repair welcome is joined'
+);
+protectedAssert(
+    str_contains($clientForBlocks, 'session.replace_member(groupId, key, material)') &&
+        str_contains($clientForBlocks, 'for_repair: repairing,'),
+    'a repair replaces the stale leaf in one commit and claims a fresh key package'
 );
 protectedAssert(
     str_contains($clientForBlocks, 'keyPackageAges.get(reference) || 0) >= mark') &&

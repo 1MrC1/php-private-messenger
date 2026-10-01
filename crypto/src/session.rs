@@ -505,6 +505,95 @@ impl MlsSession {
         serialize_ratchet_tree(&group)
     }
 
+    /// Discard this device's state for a group, so it can be re-admitted.
+    ///
+    /// A repair welcome cannot be joined while the old group is still in storage —
+    /// OpenMLS refuses with `GroupAlreadyExists`, correctly, because joining
+    /// twice would be ambiguous. A device being repaired has already given up on
+    /// that state, so forgetting it is the honest step, and it is deliberately
+    /// explicit: nothing calls this except a repair that has already found a
+    /// welcome addressed to a key package created after the failure.
+    pub fn forget_group(&mut self, group_id: &[u8]) -> Result<bool, JsValue> {
+        let id = GroupId::from_slice(group_id);
+        let mut group = match MlsGroup::load(self.provider.storage(), &id)
+            .map_err(|error| JsValue::from_str(&format!("loading the group failed: {error:?}")))?
+        {
+            Some(group) => group,
+            None => return Ok(false),
+        };
+        group
+            .delete(self.provider.storage())
+            .map_err(|error| JsValue::from_str(&format!("forgetting the group failed: {error:?}")))?;
+        self.diverged_groups.remove(&group_id.to_vec());
+        self.join_epochs.remove(group_id);
+        Ok(true)
+    }
+
+    /// Replace a stale leaf with a fresh key package in one commit.
+    ///
+    /// This is what repairing a conversation actually needs, and its absence made
+    /// the repair path advertised to users impossible: the device that lost track
+    /// is *still a member*, so admitting it again was skipped as a duplicate and
+    /// produced neither a commit nor a welcome. A review found the documentation
+    /// claiming a repair that could not happen.
+    ///
+    /// Removal and addition travel in one commit, so there is no window where the
+    /// device is out of the group and no second publication to lose.
+    pub fn replace_member(
+        &mut self,
+        group_id: &[u8],
+        old_signature_key: &[u8],
+        key_package: &[u8],
+    ) -> Result<JsValue, JsValue> {
+        let signer = self.signer()?;
+        let mut group = self.load_group(group_id)?;
+
+        let leaf = group
+            .members()
+            .find(|member| member.signature_key.as_slice() == old_signature_key)
+            .map(|member| member.index)
+            .ok_or_else(|| JsValue::from_str("that member is not in this group"))?;
+
+        let key_package_in = KeyPackageIn::tls_deserialize(&mut &key_package[..])
+            .map_err(|error| JsValue::from_str(&format!("reading the key package failed: {error:?}")))?;
+        let validated = key_package_in
+            .validate(self.provider.crypto(), ProtocolVersion::Mls10)
+            .map_err(|error| JsValue::from_str(&format!("the key package is not valid: {error:?}")))?;
+
+        let bundle = group
+            .commit_builder()
+            .propose_removals([leaf])
+            .propose_adds([validated])
+            .load_psks(self.provider.storage())
+            .map_err(|error| JsValue::from_str(&format!("loading pre-shared keys failed: {error:?}")))?
+            .build(self.provider.rand(), self.provider.crypto(), &signer, |_| true)
+            .map_err(|error| JsValue::from_str(&format!("building the repair commit failed: {error:?}")))?
+            .stage_commit(&self.provider)
+            .map_err(|error| JsValue::from_str(&format!("staging the repair commit failed: {error:?}")))?;
+
+        let (commit, welcome, _info) = bundle.into_messages();
+        let welcome = welcome
+            .ok_or_else(|| JsValue::from_str("the repair commit produced no welcome"))?;
+
+        group
+            .merge_pending_commit(&self.provider)
+            .map_err(|error| JsValue::from_str(&format!("merging the repair commit failed: {error:?}")))?;
+
+        let serialized_commit = commit
+            .tls_serialize_detached()
+            .map_err(|error| JsValue::from_str(&format!("serialising the commit failed: {error:?}")))?;
+        self.applied_commits.insert(commit_digest(&serialized_commit));
+
+        let result = AddMemberResult {
+            commit: serialized_commit,
+            welcome: welcome
+                .tls_serialize_detached()
+                .map_err(|error| JsValue::from_str(&format!("serialising the welcome failed: {error:?}")))?,
+            ratchet_tree: serialize_ratchet_tree(&group)?,
+        };
+        serde_wasm_like(&result)
+    }
+
     /// Remove a member by its signature key and return the commit the others
     /// must apply.
     ///

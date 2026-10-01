@@ -155,6 +155,27 @@ export class MlsSession {
         return v1;
     }
     /**
+     * Discard this device's state for a group, so it can be re-admitted.
+     *
+     * A repair welcome cannot be joined while the old group is still in storage —
+     * OpenMLS refuses with `GroupAlreadyExists`, correctly, because joining
+     * twice would be ambiguous. A device being repaired has already given up on
+     * that state, so forgetting it is the honest step, and it is deliberately
+     * explicit: nothing calls this except a repair that has already found a
+     * welcome addressed to a key package created after the failure.
+     * @param {Uint8Array} group_id
+     * @returns {boolean}
+     */
+    forget_group(group_id) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_forget_group(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
      * Whether this session has seen a fork in a group, and so must not send.
      * @param {Uint8Array} group_id
      * @returns {boolean}
@@ -349,6 +370,35 @@ export class MlsSession {
         var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v3;
+    }
+    /**
+     * Replace a stale leaf with a fresh key package in one commit.
+     *
+     * This is what repairing a conversation actually needs, and its absence made
+     * the repair path advertised to users impossible: the device that lost track
+     * is *still a member*, so admitting it again was skipped as a duplicate and
+     * produced neither a commit nor a welcome. A review found the documentation
+     * claiming a repair that could not happen.
+     *
+     * Removal and addition travel in one commit, so there is no window where the
+     * device is out of the group and no second publication to lose.
+     * @param {Uint8Array} group_id
+     * @param {Uint8Array} old_signature_key
+     * @param {Uint8Array} key_package
+     * @returns {any}
+     */
+    replace_member(group_id, old_signature_key, key_package) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(old_signature_key, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray8ToWasm0(key_package, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.mlssession_replace_member(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Rebuild a session from previously exported bytes.

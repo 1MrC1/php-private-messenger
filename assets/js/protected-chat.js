@@ -407,13 +407,17 @@
          * Existing members pick the commit up through `syncGroup`; without that
          * they would stay in the old epoch and stop being able to read.
          */
-        async function admitDevices(chatId, groupIdBase64, otherUserId) {
+        async function admitDevices(chatId, groupIdBase64, otherUserId, options) {
             await requireSession();
+            const repairing = !!(options && options.repair);
 
             const claim = await post('api/chat.php', {
                 action: 'claim_key_packages',
                 user_id: otherUserId,
                 chat_id: chatId,
+                // A repair must not be answered from the package already claimed
+                // for this conversation: that one is the leaf being replaced.
+                for_repair: repairing,
             });
             if (!claim || claim.success !== true) {
                 throw new Error((claim && claim.message) || 'Could not claim key packages');
@@ -423,7 +427,7 @@
                 throw new Error('A device of that account has no key packages left; it could not be added');
             }
 
-            const result = await admit(chatId, fromBase64(groupIdBase64), claim.key_packages);
+            const result = await admit(chatId, fromBase64(groupIdBase64), claim.key_packages, { repair: repairing });
             await saveSession();
             return result;
         }
@@ -436,7 +440,8 @@
          * including ones already here, and adding one twice would give it two
          * leaves.
          */
-        async function admit(chatId, groupId, keyPackages) {
+        async function admit(chatId, groupId, keyPackages, options) {
+            const repairing = !!(options && options.repair);
             let admitted = 0;
             let skipped = 0;
             for (const entry of keyPackages) {
@@ -453,11 +458,21 @@
                         'so it was not added'
                     );
                 }
-                if (session.has_member(groupId, key)) {
+                const alreadyMember = session.has_member(groupId, key);
+                if (alreadyMember && !repairing) {
                     skipped++;
                     continue;
                 }
-                const added = session.add_member(groupId, material);
+
+                // A device being repaired is still in the group under the leaf it
+                // can no longer use. Replacing that leaf and admitting the fresh
+                // key package happen in one commit, so there is no window where
+                // it is out and no second publication to lose. Skipping it, which
+                // is what used to happen, meant the advertised repair produced
+                // nothing at all.
+                const added = alreadyMember
+                    ? session.replace_member(groupId, key, material)
+                    : session.add_member(groupId, material);
                 // The epoch the group is in once this commit has been applied,
                 // not a placeholder: the server orders handshakes by it.
                 const epoch = Number(session.epoch(groupId));
@@ -517,8 +532,15 @@
             // Handshakes for a group this device has not joined yet, held in case
             // a welcome later in the queue makes them ours.
             const deferred = [];
-            /** Whether this walk was re-admitted through the awaited key package. */
+            /** Whether this walk was re-admitted through an awaited key package. */
             let rejoinedThisWalk = false;
+            /**
+             * Whether this device is still looking for its repair welcome.
+             *
+             * Re-read per entry, and cleared as soon as that welcome is joined, so
+             * commits published after it are applied rather than skipped.
+             */
+            let repairing = pendingRejoin.has(Number(chatId));
 
             async function replayDeferred() {
                 let newlyApplied = 0;
@@ -561,10 +583,9 @@
                     break;
                 }
 
-                const awaitingRejoin = pendingRejoin.has(Number(chatId));
                 for (const entry of handshakes) {
                     const sequence = Number(entry.sequence);
-                    if (sequence !== lastSequence + 1 && !awaitingRejoin) {
+                    if (sequence !== lastSequence + 1 && !repairing) {
                         incomplete.add(Number(chatId));
                         await requireRejoin(chatId);
                         throw new Error(
@@ -582,7 +603,14 @@
                     // welcome can help, so only a welcome is looked at. Without
                     // this the conversation could never be repaired at all, which
                     // is a fine way to make people turn the feature off.
-                    if (awaitingRejoin && entry.kind !== 3) {
+                    //
+                    // `repairing` is re-read on every entry and cleared the moment
+                    // the repair welcome is joined. It used to be computed once
+                    // per page, which skipped *everything* after that welcome too:
+                    // a review put a removal immediately after it, watched the
+                    // device step over it while the cursor advanced, and had the
+                    // removed member read the next send.
+                    if (repairing && entry.kind !== 3) {
                         continue;
                     }
 
@@ -610,6 +638,17 @@
                                     .map((reference) => toBase64(reference));
                                 if (recipients.some((reference) => (keyPackageAges.get(reference) || 0) >= mark)) {
                                     rejoinedThisWalk = true;
+                                    // The welcome cannot be joined while the
+                                    // abandoned group is still in storage, and
+                                    // this device has already given up on it.
+                                    const recalledGroup = await recallConversation(chatId);
+                                    if (recalledGroup && recalledGroup.groupId) {
+                                        session.forget_group(fromBase64(recalledGroup.groupId));
+                                    }
+                                    // Out of repair mode from here on: everything
+                                    // after this welcome is current history and
+                                    // has to be applied, not skipped.
+                                    repairing = false;
                                 }
                             }
                             joinedGroupId = session.join_group(split.head, split.tail);
@@ -687,7 +726,9 @@
                 // device published after it lost track. Nothing that merely
                 // applies can lift this, because "it applied" and "I am no longer
                 // missing a change" are different statements.
-                if (rejoinedThisWalk) {
+                // Re-admitted, the whole queue walked contiguously to its end,
+                // and nothing left unapplied. All three, or the block stays.
+                if (rejoinedThisWalk && complete && !repairing && deferred.length === 0) {
                     incomplete.delete(Number(chatId));
                     pendingRejoin.delete(Number(chatId));
                     await saveBlocks();

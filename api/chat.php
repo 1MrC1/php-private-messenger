@@ -681,7 +681,10 @@ try {
                                 (int)$currentUser['id'],
                                 $targetUserId,
                                 $claimChatId,
-                                new ProtectedChat()
+                                new ProtectedChat(),
+                                // A repair needs a package the group does not
+                                // already contain; see DeviceDirectory.
+                                ($input['for_repair'] ?? false) === true
                             ),
                         ];
                         break;

@@ -175,6 +175,62 @@ const decoder = new TextDecoder();
         'a message from the epoch we just left is still readable');
     console.log('PASS: out-of-order delivery across an epoch change does not lose the message');
 
+    // ---- a repair must not step over what follows its welcome ---------------
+    // The eighth review's finding, in the engine terms it reduces to: a device
+    // that joins a fresh welcome and then ignores the commits published after it
+    // keeps sending at the old epoch, which a removed member can still read. The
+    // client-side rule is tested in the client suite; this pins the engine
+    // behaviour the rule depends on — that a repaired device *can* apply what
+    // follows, and that skipping it is what breaks removal.
+
+    const host = session('host@example');
+    const guest = session('guest@example');
+    const doomed = session('doomed@example');
+
+    const repairGroup = host.create_group();
+    const guestJoin = host.add_member(repairGroup, guest.create_key_package());
+    const guestGroup = guest.join_group(guestJoin.welcome, guestJoin.ratchet_tree);
+    const doomedJoin = host.add_member(repairGroup, doomed.create_key_package());
+    assert.equal(guest.apply_handshake(doomedJoin.commit), 'applied');
+    const doomedGroup = doomed.join_group(doomedJoin.welcome, doomedJoin.ratchet_tree);
+
+    // The guest is repaired: its stale leaf is replaced in one commit.
+    const freshPackage = guest.create_key_package();
+    const freshReference = Buffer.from(mls.MlsSession.key_package_ref(freshPackage)).toString('base64');
+    const repair = host.replace_member(repairGroup, guest.identity_key(), freshPackage);
+    assert.ok(
+        mls.MlsSession.welcome_recipients(repair.welcome)
+            .map((reference) => Buffer.from(reference).toString('base64'))
+            .includes(freshReference),
+        'the repair welcome admits the key package the guest published'
+    );
+    assert.equal(doomed.apply_handshake(repair.commit), 'applied',
+        'the other members apply the repair');
+
+    assert.equal(guest.forget_group(repairGroup), true, 'the guest discards the state it gave up on');
+    const guestRepaired = guest.join_group(repair.welcome, repair.ratchet_tree);
+    console.log('PASS: a stale leaf is replaced in one commit and the device rejoins');
+
+    // Now a removal lands *after* that welcome. A repaired device that skipped
+    // it would keep sending at an epoch the removed device can read.
+    const laterRemoval = host.remove_member(repairGroup, doomed.identity_key());
+    assert.equal(guest.apply_handshake(laterRemoval), 'applied',
+        'the repaired device applies the commit published after its welcome');
+
+    const afterRepair = guest.seal(guestRepaired, encoder.encode('after the repair and the removal'));
+    assert.equal(decoder.decode(host.open(repairGroup, afterRepair).plaintext),
+        'after the repair and the removal', 'the host reads it');
+    let removedCouldRead = false;
+    try {
+        removedCouldRead = decoder.decode(doomed.open(doomedGroup, afterRepair).plaintext) ===
+            'after the repair and the removal';
+    } catch (error) {
+        removedCouldRead = false;
+    }
+    assert.equal(removedCouldRead, false,
+        'and the removed device cannot, because the repaired device applied the removal');
+    console.log('PASS: a repaired device applies what follows its welcome, so a later removal still holds');
+
     console.log('MLS fork and state-format tests passed.');
 })().catch((error) => {
     console.error(error);
